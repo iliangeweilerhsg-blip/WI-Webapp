@@ -96,6 +96,11 @@ struct SchemaBundle: Codable {
     let dashboardLayout: DashboardLayout?
     let dataSettings: DataSettings?
     let dataSettingsUpdate: DataSettingsUpdate?
+    let deckLock: DeckLock?
+    let deckOption: DeckOption?
+    let deckOptions: DeckOptions?
+    let deckSource: DeckSource?
+    let deckUse: DeckUse?
     let device: Device?
     let deviceKind: DeviceKind?
     let deviceList: DeviceList?
@@ -540,6 +545,11 @@ struct SchemaBundle: Codable {
         case dashboardLayout = "DashboardLayout"
         case dataSettings = "DataSettings"
         case dataSettingsUpdate = "DataSettingsUpdate"
+        case deckLock = "DeckLock"
+        case deckOption = "DeckOption"
+        case deckOptions = "DeckOptions"
+        case deckSource = "DeckSource"
+        case deckUse = "DeckUse"
         case device = "Device"
         case deviceKind = "DeviceKind"
         case deviceList = "DeviceList"
@@ -1004,6 +1014,11 @@ extension SchemaBundle {
         dashboardLayout: DashboardLayout?? = nil,
         dataSettings: DataSettings?? = nil,
         dataSettingsUpdate: DataSettingsUpdate?? = nil,
+        deckLock: DeckLock?? = nil,
+        deckOption: DeckOption?? = nil,
+        deckOptions: DeckOptions?? = nil,
+        deckSource: DeckSource?? = nil,
+        deckUse: DeckUse?? = nil,
         device: Device?? = nil,
         deviceKind: DeviceKind?? = nil,
         deviceList: DeviceList?? = nil,
@@ -1448,6 +1463,11 @@ extension SchemaBundle {
             dashboardLayout: dashboardLayout ?? self.dashboardLayout,
             dataSettings: dataSettings ?? self.dataSettings,
             dataSettingsUpdate: dataSettingsUpdate ?? self.dataSettingsUpdate,
+            deckLock: deckLock ?? self.deckLock,
+            deckOption: deckOption ?? self.deckOption,
+            deckOptions: deckOptions ?? self.deckOptions,
+            deckSource: deckSource ?? self.deckSource,
+            deckUse: deckUse ?? self.deckUse,
             device: device ?? self.device,
             deviceKind: deviceKind ?? self.deviceKind,
             deviceList: deviceList ?? self.deviceList,
@@ -6542,6 +6562,312 @@ extension DataSettingsUpdate {
     }
 }
 
+/// Warum der Foliensatz einer Session nicht gesetzt oder gewechselt werden kann (§22.4):
+/// abgeschlossen = Session beendet/verarbeitet/verpasst, folienwechsel = Satz vorhanden und
+/// schon slide_event
+enum DeckLock: String, Codable {
+    case abgeschlossen = "abgeschlossen"
+    case folienwechsel = "folienwechsel"
+}
+
+/// Ein wählbarer Foliensatz mit Verfügbarkeit (§22.3)
+// MARK: - DeckOption
+struct DeckOption: Codable {
+    /// Größtes moodle_item.timemodified der Moodle-Dateien des Satzes, sonst
+    /// slide_deck.uploaded_at
+    let availableAt: Date
+    let deck: SlideDeck
+    /// Keine andere nicht gelöschte Session in geplant, bereit, laeuft, pausiert, beendet oder
+    /// verarbeitet trägt den Satz
+    let free: Bool
+    let source: DeckSource
+    /// Andere Sessions, die den Satz tragen und ihn belegen (wie free), nach
+    /// coalesce(started_at, created_at) absteigend, dann id, höchstens 3 (nur zur Anzeige, keine
+    /// Gesamtzahl)
+    let usedBy: [DeckUse]
+
+    enum CodingKeys: String, CodingKey {
+        case availableAt = "available_at"
+        case deck = "deck"
+        case free = "free"
+        case source = "source"
+        case usedBy = "used_by"
+    }
+}
+
+// MARK: DeckOption convenience initializers and mutators
+
+extension DeckOption {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(DeckOption.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        availableAt: Date? = nil,
+        deck: SlideDeck? = nil,
+        free: Bool? = nil,
+        source: DeckSource? = nil,
+        usedBy: [DeckUse]? = nil
+    ) -> DeckOption {
+        return DeckOption(
+            availableAt: availableAt ?? self.availableAt,
+            deck: deck ?? self.deck,
+            free: free ?? self.free,
+            source: source ?? self.source,
+            usedBy: usedBy ?? self.usedBy
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - SlideDeck
+struct SlideDeck: Codable {
+    let createdAt: Date
+    let deletedAt: Date?
+    let id: String
+    let ingestState: IngestState
+    let moduleID: String
+    /// null bis pdf.ingest gelaufen ist
+    let pageCount: Int?
+    let sessionID: String?
+    let sha256: String
+    let title: String
+    let updatedAt: Date
+    let uploadedAt: Date
+    let userID: String
+
+    enum CodingKeys: String, CodingKey {
+        case createdAt = "created_at"
+        case deletedAt = "deleted_at"
+        case id = "id"
+        case ingestState = "ingest_state"
+        case moduleID = "module_id"
+        case pageCount = "page_count"
+        case sessionID = "session_id"
+        case sha256 = "sha256"
+        case title = "title"
+        case updatedAt = "updated_at"
+        case uploadedAt = "uploaded_at"
+        case userID = "user_id"
+    }
+}
+
+// MARK: SlideDeck convenience initializers and mutators
+
+extension SlideDeck {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SlideDeck.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        createdAt: Date? = nil,
+        deletedAt: Date?? = nil,
+        id: String? = nil,
+        ingestState: IngestState? = nil,
+        moduleID: String? = nil,
+        pageCount: Int?? = nil,
+        sessionID: String?? = nil,
+        sha256: String? = nil,
+        title: String? = nil,
+        updatedAt: Date? = nil,
+        uploadedAt: Date? = nil,
+        userID: String? = nil
+    ) -> SlideDeck {
+        return SlideDeck(
+            createdAt: createdAt ?? self.createdAt,
+            deletedAt: deletedAt ?? self.deletedAt,
+            id: id ?? self.id,
+            ingestState: ingestState ?? self.ingestState,
+            moduleID: moduleID ?? self.moduleID,
+            pageCount: pageCount ?? self.pageCount,
+            sessionID: sessionID ?? self.sessionID,
+            sha256: sha256 ?? self.sha256,
+            title: title ?? self.title,
+            updatedAt: updatedAt ?? self.updatedAt,
+            uploadedAt: uploadedAt ?? self.uploadedAt,
+            userID: userID ?? self.userID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum IngestState: String, Codable {
+    case fehler = "fehler"
+    case neu = "neu"
+    case verarbeitet = "verarbeitet"
+}
+
+/// Herkunft eines wählbaren Foliensatzes (VERTRAEGE §22.3): moodle = mindestens eine
+/// Moodle-Datei zeigt auf den Satz
+enum DeckSource: String, Codable {
+    case moodle = "moodle"
+    case upload = "upload"
+}
+
+/// Kurzangabe einer Session, die einen Foliensatz belegt ("schon in VL 6", §22.3)
+// MARK: - DeckUse
+struct DeckUse: Codable {
+    /// VL-Nummer (Session.number)
+    let number: Int?
+    let sessionID: String
+    let title: String?
+
+    enum CodingKeys: String, CodingKey {
+        case number = "number"
+        case sessionID = "session_id"
+        case title = "title"
+    }
+}
+
+// MARK: DeckUse convenience initializers and mutators
+
+extension DeckUse {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(DeckUse.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        number: Int?? = nil,
+        sessionID: String? = nil,
+        title: String?? = nil
+    ) -> DeckUse {
+        return DeckUse(
+            number: number ?? self.number,
+            sessionID: sessionID ?? self.sessionID,
+            title: title ?? self.title
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// GET /modules/{id}/deck-options?session_id (§22.3). Momentaufnahme, verbindlich prüft erst
+/// PATCH /sessions/{id}
+// MARK: - DeckOptions
+struct DeckOptions: Codable {
+    /// Nicht gelöschter Satz der Session, sonst null (auch ohne session_id und bei gelöschtem
+    /// Satz)
+    let currentDeckID: String?
+    /// Wählbare Sätze, available_at absteigend, dann id absteigend, höchstens 50. Der aktuelle
+    /// Satz ist immer dabei (auch bei fehler und jenseits der 50), ebenso der Vorschlag (dann
+    /// bis zu 51 Einträge)
+    let items: [DeckOption]
+    let lock: DeckLock?
+    let moduleID: String
+    let sessionID: String?
+    /// Erster freier Satz in der Reihenfolge von items, sonst null. Auch ohne session_id
+    /// (spontaner Start). Null, wenn die Session schon einen Satz dieses Moduls hat oder
+    /// abgeschlossen ist
+    let suggestedDeckID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case currentDeckID = "current_deck_id"
+        case items = "items"
+        case lock = "lock"
+        case moduleID = "module_id"
+        case sessionID = "session_id"
+        case suggestedDeckID = "suggested_deck_id"
+    }
+}
+
+// MARK: DeckOptions convenience initializers and mutators
+
+extension DeckOptions {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(DeckOptions.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        currentDeckID: String?? = nil,
+        items: [DeckOption]? = nil,
+        lock: DeckLock?? = nil,
+        moduleID: String? = nil,
+        sessionID: String?? = nil,
+        suggestedDeckID: String?? = nil
+    ) -> DeckOptions {
+        return DeckOptions(
+            currentDeckID: currentDeckID ?? self.currentDeckID,
+            items: items ?? self.items,
+            lock: lock ?? self.lock,
+            moduleID: moduleID ?? self.moduleID,
+            sessionID: sessionID ?? self.sessionID,
+            suggestedDeckID: suggestedDeckID ?? self.suggestedDeckID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 /// Gekoppeltes Gerät. Das Token selbst gibt die API nie aus (gespeichert nur token_hash).
 // MARK: - Device
 struct Device: Codable {
@@ -7641,12 +7967,6 @@ extension ExerciseSheet {
     func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
         return String(data: try self.jsonData(), encoding: encoding)
     }
-}
-
-enum IngestState: String, Codable {
-    case fehler = "fehler"
-    case neu = "neu"
-    case verarbeitet = "verarbeitet"
 }
 
 // MARK: - ExerciseSheetList
@@ -21453,95 +21773,6 @@ enum SlideChangeOpKind: String, Codable {
     case slideChange = "slide.change"
 }
 
-// MARK: - SlideDeck
-struct SlideDeck: Codable {
-    let createdAt: Date
-    let deletedAt: Date?
-    let id: String
-    let ingestState: IngestState
-    let moduleID: String
-    /// null bis pdf.ingest gelaufen ist
-    let pageCount: Int?
-    let sessionID: String?
-    let sha256: String
-    let title: String
-    let updatedAt: Date
-    let uploadedAt: Date
-    let userID: String
-
-    enum CodingKeys: String, CodingKey {
-        case createdAt = "created_at"
-        case deletedAt = "deleted_at"
-        case id = "id"
-        case ingestState = "ingest_state"
-        case moduleID = "module_id"
-        case pageCount = "page_count"
-        case sessionID = "session_id"
-        case sha256 = "sha256"
-        case title = "title"
-        case updatedAt = "updated_at"
-        case uploadedAt = "uploaded_at"
-        case userID = "user_id"
-    }
-}
-
-// MARK: SlideDeck convenience initializers and mutators
-
-extension SlideDeck {
-    init(data: Data) throws {
-        self = try newJSONDecoder().decode(SlideDeck.self, from: data)
-    }
-
-    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
-        guard let data = json.data(using: encoding) else {
-            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
-        }
-        try self.init(data: data)
-    }
-
-    init(fromURL url: URL) throws {
-        try self.init(data: try Data(contentsOf: url))
-    }
-
-    func with(
-        createdAt: Date? = nil,
-        deletedAt: Date?? = nil,
-        id: String? = nil,
-        ingestState: IngestState? = nil,
-        moduleID: String? = nil,
-        pageCount: Int?? = nil,
-        sessionID: String?? = nil,
-        sha256: String? = nil,
-        title: String? = nil,
-        updatedAt: Date? = nil,
-        uploadedAt: Date? = nil,
-        userID: String? = nil
-    ) -> SlideDeck {
-        return SlideDeck(
-            createdAt: createdAt ?? self.createdAt,
-            deletedAt: deletedAt ?? self.deletedAt,
-            id: id ?? self.id,
-            ingestState: ingestState ?? self.ingestState,
-            moduleID: moduleID ?? self.moduleID,
-            pageCount: pageCount ?? self.pageCount,
-            sessionID: sessionID ?? self.sessionID,
-            sha256: sha256 ?? self.sha256,
-            title: title ?? self.title,
-            updatedAt: updatedAt ?? self.updatedAt,
-            uploadedAt: uploadedAt ?? self.uploadedAt,
-            userID: userID ?? self.userID
-        )
-    }
-
-    func jsonData() throws -> Data {
-        return try newJSONEncoder().encode(self)
-    }
-
-    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
-        return String(data: try self.jsonData(), encoding: encoding)
-    }
-}
-
 // MARK: - SlideDeckDetail
 struct SlideDeckDetail: Codable {
     let deck: SlideDeck
@@ -27027,6 +27258,56 @@ extension DataSettingsUpdate {
     }
 }
 
+extension DeckOption {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(availableAt, forKey: .availableAt)
+        try container.encode(deck, forKey: .deck)
+        try container.encode(free, forKey: .free)
+        try container.encode(source, forKey: .source)
+        try container.encode(usedBy, forKey: .usedBy)
+    }
+}
+
+extension SlideDeck {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(deletedAt, forKey: .deletedAt)
+        try container.encode(id, forKey: .id)
+        try container.encode(ingestState, forKey: .ingestState)
+        try container.encode(moduleID, forKey: .moduleID)
+        try container.encode(pageCount, forKey: .pageCount)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(sha256, forKey: .sha256)
+        try container.encode(title, forKey: .title)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(uploadedAt, forKey: .uploadedAt)
+        try container.encode(userID, forKey: .userID)
+    }
+}
+
+extension DeckUse {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(number, forKey: .number)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(title, forKey: .title)
+    }
+}
+
+extension DeckOptions {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(currentDeckID, forKey: .currentDeckID)
+        try container.encode(items, forKey: .items)
+        try container.encode(lock, forKey: .lock)
+        try container.encode(moduleID, forKey: .moduleID)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(suggestedDeckID, forKey: .suggestedDeckID)
+    }
+}
+
 extension Device {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -29502,24 +29783,6 @@ extension SlideChangeOp {
         try container.encodeIfPresent(seq, forKey: .seq)
         try container.encode(stream, forKey: .stream)
         try container.encode(type, forKey: .type)
-    }
-}
-
-extension SlideDeck {
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(createdAt, forKey: .createdAt)
-        try container.encode(deletedAt, forKey: .deletedAt)
-        try container.encode(id, forKey: .id)
-        try container.encode(ingestState, forKey: .ingestState)
-        try container.encode(moduleID, forKey: .moduleID)
-        try container.encode(pageCount, forKey: .pageCount)
-        try container.encode(sessionID, forKey: .sessionID)
-        try container.encode(sha256, forKey: .sha256)
-        try container.encode(title, forKey: .title)
-        try container.encode(updatedAt, forKey: .updatedAt)
-        try container.encode(uploadedAt, forKey: .uploadedAt)
-        try container.encode(userID, forKey: .userID)
     }
 }
 

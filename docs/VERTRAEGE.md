@@ -295,9 +295,10 @@ Listen mit `?cursor&limit` (Standard 50, höchstens 200).
 | `GET /sessions?module_id&state&from&to&order` | – | 200 `SessionList` | 400 `validation_failed` bei ungültigem `order`, 400 `invalid_cursor` bei ungültigem Cursor |
 | `POST /sessions` | `SessionCreate` | 201 `Session` (Zustand `bereit`) | 404 `module_not_found`, 404 `slide_deck_not_found`, 400 `slide_deck_module_mismatch` (Foliensatz eines anderen Moduls), 409 `session_exists` |
 | `GET /sessions/{id}` | – | 200 `Session` | 404 `session_not_found` |
-| `PATCH /sessions/{id}` | `SessionUpdate` | 200 `Session` | 404 |
+| `PATCH /sessions/{id}` | `SessionUpdate` | 200 `Session` | 404 `session_not_found`. Mit `slide_deck_id` (§22.4): 404 `slide_deck_not_found`, 400 `slide_deck_module_mismatch`, 409 `slide_deck_session_closed`, 409 `slide_deck_locked` |
 | `DELETE /sessions/{id}` | – | 204 (Papierkorb über `softDeleteWithOps`, Kaskade §13, dann `session.updated` mit `deleted_at`) | 404, 409 `session_active` (läuft oder pausiert) |
 | `GET /sessions/{id}/snapshot` | – | 200 `SessionSnapshot` | 404 |
+| `GET /modules/{id}/deck-options?session_id` | – | 200 `DeckOptions` (§22.3, nur lesend) | 404 `module_not_found`, 404 `session_not_found`, 400 `session_module_mismatch`, 400 `validation_failed` (ungültige UUID) |
 | `GET /sessions/{id}/notebook` | – | 200 `Notebook` | 404 `session_not_found`, 404 `notebook_not_found` (Rückfall: Modul gelöscht, Session nicht. Über `DELETE /modules` kommt das nicht vor, die Kaskade §13 löscht die Sessions mit) |
 | `POST /sessions/{id}/start` | `SessionStartRequest` | 200 `SessionStartResult` | 404, 409 `session_transition_invalid` |
 | `POST /sessions/{id}/pause` | – | 200 `Session` | 404, 409 `session_transition_invalid` |
@@ -1027,6 +1028,7 @@ Die Bereiche KI, Lernen und Planer kommen in späteren Phasen als eigene Schlüs
 | `pairing_window_closed` | 409 | Kopplungsfenster zu oder abgelaufen (§12) |
 | `chunk_header_invalid`, `backup_target_invalid`, `backup_encryption_unavailable`, `upload_aborted`, `slide_deck_module_mismatch` | 400 | Anfrage ungültig (`upload_aborted`: der Client hat den Upload abgebrochen; `backup_encryption_unavailable`: Backup-Verschlüsselung lässt sich nicht einschalten, §14.1) |
 | `slide_deck_not_found` | 404 | Foliensatz fehlt oder ist gelöscht (Session-Routen) |
+| `slide_deck_locked`, `slide_deck_session_closed` | 409 | Foliensatz einer Session lässt sich nicht ändern: schon Folienwechsel bzw. Session abgeschlossen (§22.4, §22.5, §22.10) |
 | `pairing_code_invalid`, `pairing_request_rejected`, `local_only` | 403 | Code falsch, Anfrage abgelehnt bzw. Route nur lokal |
 | `pairing_request_not_found` | 404 | Kopplungsanfrage unbekannt |
 | `file_too_large`, `chunk_too_large` | 413 | Größe |
@@ -1077,7 +1079,7 @@ T1-DB legt alle an: `appendOp`, `softDelete`/`restoreFromTrash` und `getSettings
 | Operation anhängen | `services/core/src/sync/append.ts` | `appendOp(tx: Tx, stream: string, op: { kind: SyncOp['kind']; data: unknown; at: number; clockUncertain: boolean; origin: SyncOrigin; opId?: string; deviceId?: string \| null }): Promise<{ seq: number; opId: string; duplicate: boolean }>`. Sperrt `sync_stream`, prüft unter der Sperre die `op_id`, schreibt `sync_op` und meldet die Operation per `pg_notify('sg_sync_op')`. Postgres stellt das erst nach dem Commit zu. `listenCommittedOps(sql, db, onError?)` ruft dann `onOpCommitted` auf, je Strom lückenlos in `seq`-Reihenfolge, auch nach einem Neuverbinden. **Über Ströme hinweg gibt es keine Reihenfolge** (nach einem Neuverbinden kann ein anderer Strom vor den nachgelieferten Operationen eines Stroms ankommen, #143). Wirft der Hook, wiederholt er später ab derselben `seq`. Gelesen und ausgeliefert wird in Paketen zu 500. Optional `listenCommittedOps(sql, db, onError?, { channels })`: weitere LISTEN-Kanäle (z. B. `sg_event`) auf derselben seriellen Kette. Setter: `setOnOpCommitted(hook)`, Standard: nichts. `findOpById(db, opId)` liefert eine gespeicherte Operation, `toCommitted(row)` macht aus einer `sync_op`-Zeile die Form des Hooks | **T1-DB**. T1-08 startet `listenCommittedOps` beim Core-Start und setzt den Hook für Versand und `ack` (§11.2) |
 | Duplikate und Ablauf | Dispatcher in `services/core/src/sync/**` | **Ablauf je Client-Operation (einzige Beschreibung):** (1) `findOpById` vor der Transaktion. Gleiche Operation (Strom, Art, Daten): ursprüngliches `ack` ohne Handler, erst wenn der Versand des Stroms die ursprüngliche `seq` erreicht hat. Abweichende: `error op_id_reused`. (2) In **einer** Transaktion optional `preLock(tx, op)`. (3) `appendOp` mit der Client-Operation **vor** dem Handler. Bei `duplicate = true` (gleichzeitiges Duplikat) Rollback und das ursprüngliche `ack`. Dieselbe neue `op_id` gleichzeitig in zwei Strömen ergibt `internal_error` (wiederholbar). (4) Handler. (5) Bei `SyncOpError` Rollback, es wird keine `seq` vergeben. Handler prüfen Duplikate nie selbst. Sie gehen davon aus, dass die Client-Operation schon in `sync_op` steht, und schreiben selbst nur Server-Operationen | T1-08 |
 | Op-Handler | `services/core/src/sync/handlers.ts` | `registerOpHandler(kind, handler: (tx: Tx, op: SyncOp, ctx: { deviceId: string \| null; origin: SyncOrigin }) => Promise<void>, opts?: { preLock?: (tx: Tx, op: SyncOp) => Promise<void> })`, ein Handler pro Art, Ablauf siehe „Duplikate und Ablauf“. `preLock` sperrt vor `appendOp` die Zeilen, die auch andere Wege vor dem Strom sperren. Fehler über `throw new SyncOpError(code: SyncErrorCode, retryable: boolean, details?, opts?: { fatal?: boolean })`: `retryable` → fatal, 4503. `session_superseded` → immer fatal, 4409. `fatal` bei anderen Codes → 1008 (`device_token_invalid` → 4401). Sonst nicht fatal. Server-Operationen stehen in `SERVER_ONLY_KINDS` (`handlers.ts`), einer **Liste von Hand**: Neue Server-Operationen müssen dort eingetragen werden. Ein Unit-Test vergleicht sie mit den Schema-Varianten, deren Beschreibung mit „Nur vom Server“ beginnt. Von einem Client lehnt der Dispatcher sie mit `op_not_allowed` ab, bevor ein Handler läuft | Registry T1-08, Handler die Fachtickets. Registrieren beim Start im Sync-Plugin (`sync/server.ts`), beim Beenden wieder abmelden. Core-Ink: `registerInkHandlers({ dataDir })` in `sync/handlers/ink.ts`, `dataDir` aus der Konfiguration. Die Session-Handler (`registerSessionHandlers()`, T1-02) registriert das Sync-Plugin ebenso, mit `preLock`. Aktiv seit T1-02 |
-| Sperr-Reihenfolge | alle Schreibwege mit `appendOp` | **Einzige Beschreibung.** Allgemein: zuerst den Strom sperren (`appendOp`), dann die Fachzeilen. REST-Wege wie `PATCH`/`DELETE /notebooks/{id}` sperren darum zuerst den Strom und danach das Notizbuch. **Ausnahme:** Was ein Handler in `preLock` sperrt, wird in **allen** Wegen (auch über REST) vor dem Strom gesperrt, z. B. `lockSessionTransitions` (T1-02). **Auch Kaskaden, die Session-Zeilen sperren** (`DELETE` auf Modul, Semester, Kalenderquelle und Session über `softDeleteWithOps`), nehmen als `before` zuerst `lockSessionTransitions`; beim Semester nach der Semester-Sperre. Sonst droht ein Deadlock mit REST-Start/-Stopp, Takt und „spätere Session“. Session-Zeilen nur mit `FOR NO KEY UPDATE`. Wer Server-Operationen in **andere** Ströme schreibt, nimmt in `preLock` die Sperren der Fachzeilen, die andere Wege vor diesem Strom nehmen. Sonst droht ein Deadlock (40P01) | alle |
+| Sperr-Reihenfolge | alle Schreibwege mit `appendOp` | **Einzige Beschreibung.** Allgemein: zuerst den Strom sperren (`appendOp`), dann die Fachzeilen. REST-Wege wie `PATCH`/`DELETE /notebooks/{id}` sperren darum zuerst den Strom und danach das Notizbuch. **Ausnahme:** Was ein Handler in `preLock` sperrt, wird in **allen** Wegen (auch über REST) vor dem Strom gesperrt, z. B. `lockSessionTransitions` (T1-02). **Auch Kaskaden, die Session-Zeilen sperren** (`DELETE` auf Modul, Semester, Kalenderquelle und Session über `softDeleteWithOps`), nehmen als `before` zuerst `lockSessionTransitions`; beim Semester nach der Semester-Sperre. Sonst droht ein Deadlock mit REST-Start/-Stopp, Takt und „spätere Session“. Session-Zeilen nur mit `FOR NO KEY UPDATE`. **`PATCH /sessions/{id}` mit `slide_deck_id` und der Upload mit `session_id`** folgen der Reihenfolge aus §22.4/§22.5 (Zustandswechsel → Session-Zeile → Strom → nur nicht gelöschte `slide_deck`-Zeilen). Wer Server-Operationen in **andere** Ströme schreibt, nimmt in `preLock` die Sperren der Fachzeilen, die andere Wege vor diesem Strom nehmen. Sonst droht ein Deadlock (40P01) | alle |
 | Ereignisse | `services/core/src/sync/events.ts` | `publishEvent(event: SyncEvent, opts?: { localOnly?: boolean }): void` und `publishAfterCommit(tx: Tx, event: SyncEvent): Promise<void>`. `publishAfterCommit` nutzt denselben Weg wie `appendOp`: `pg_notify('sg_event', <Event-JSON>)` in `tx`, das Ereignis vollständig in der Nutzlast, über 7000 Byte (UTF-8) wirft es. Ein Listener auf `sg_event` ruft `publishEvent` auf | T1-08 |
 | Verbindungen | `services/core/src/sync/connections.ts` | `closeDeviceConnections(deviceId: string, code: number): void`, `isDeviceConnected(deviceId: string): boolean` | T1-08 |
 | Session-Übergang | `services/core/src/services/sessions.ts` | `transitionSession(tx: Tx, sessionId: string, action: 'start' \| 'pause' \| 'resume' \| 'stop', input: { at: Date; origin: SyncOrigin; deviceId?: string \| null; startedFrom?: ClientDevice; reason?: StopReason; moduleId?: string; calendarEventId?: string \| null; slideDeckId?: string \| null; now?: Date }): Promise<{ session: Session; endedSession: Session \| null }>` (schreibt selbst die Server-Operationen und sendet `session.updated`; `now` ist die Uhr für Folgezeiten, Standard Systemzeit). Aus dem Sync wird sie nur für Geräte-Operationen mit `origin ≠ server` gerufen. `lockSessionTransitions(tx)` und `SESSION_PRELOCKS` (`sync/handlers/session.ts`) sind die Sperren für Zustandswechsel | T1-02 |
@@ -2427,3 +2429,175 @@ Eine Liste aller Karten mit Filtern, Suche und Massenaktionen. Ohne Gesamtzahl u
 - Keine Teilfehler: Außer den beiden `skipped`-Codes gibt es keinen Fehlercode je Karte. Ein Datenbankfehler rollt alles zurück.
 
 **Fehlercodes:** keine neuen. `validation_failed` und `invalid_cursor` gelten wie bisher, `card_not_found` taucht nur als `skipped.code` auf (§21.11).
+
+---
+
+## 22. Folien in der Vorlesung (F-SES-02, F-DSH-02, F-MDL-04)
+
+Owner-Entscheidungen vom 17.11.2026, Plan in [`docs/plaene/FOLIEN-SESSION.md`](plaene/FOLIEN-SESSION.md). Dieser Abschnitt legt fest, wie eine Session zu ihrem Foliensatz kommt: als Vorschlag beim Start, per Wahl oder Upload während der Vorlesung und als ruhiges Angebot, wenn Moodle neue Folien liefert. Der Ein-Tipp-Start (F-SES-02, LP1) bleibt: kein Dialog, ein Tipp startet mit dem Vorschlag.
+
+**Nicht in diesem Schnitt:** Folien für eine beendete Session (braucht `align.content`, F-NAC-03), Wechsel des Satzes nach dem ersten Folienwechsel, Abbildung von Notizen auf eine neue Fassung (F-ORG-02).
+
+### 22.1 Begriffe und Bestand
+
+- **Maßgeblich ist allein `session.slide_deck_id`.** Live-Ansicht, iPad, Rückblick und `align.log` lesen nur dieses Feld. Mehrere Sessions dürfen denselben Satz haben (ein Satz über zwei Vorlesungen). Der Core lehnt das nie ab.
+- **`slide_deck.session_id` ist nur ein Hinweis** („für diese Session hochgeladen oder zuerst gewählt“). Kein Leser in Core, Worker, Web oder iPad wertet ihn aus, er steht nur in `SlideDeck`. Er wird wie bisher nur gesetzt, wenn er leer ist (`linkDeckToSession`). Ein später wiederhergestellter Satz kann darum einen veralteten Hinweis tragen (er zeigt auf eine Session, die inzwischen einen anderen Satz hat). Das ist harmlos, weil kein Leser ihn auswertet. Neu: Verliert eine Session ihren Satz (22.4) und zeigt `slide_deck.session_id` des alten Satzes auf diese Session, wird er `NULL`. **Ein gelöschter alter Satz wird dabei weder gesperrt noch geändert**, sein Hinweis bleibt stehen (so auch beim Upload, 22.5): Bei gelöschten Sätzen liest ihn niemand, und das Anfassen verklemmte sich mit dem endgültigen Löschen aus dem Papierkorb (`40P01`, 22.4).
+- **Stand vor diesem Abschnitt (im Code geprüft am 17.11.2026):** `POST /sessions`, `POST /sessions/{id}/start`, `PATCH /sessions/{id}` und `POST /slide-decks` nehmen `slide_deck_id` bzw. `session_id` schon an. `PATCH` prüft heute weder Zustand noch Folienwechsel und nimmt keine Sperre. Die Web-App ruft keinen dieser Wege mit Foliensatz auf, der Moodle-Abgleich legt Sätze ohne Session an.
+- **Folienwechsel entstehen nur am Mac.** Die Web-App sendet `slide.change` nur mit geladenem Foliensatz. Die iPad-App sendet kein `slide.change`, sie liest nur. In einer Session ohne Satz gibt es darum im Normalfall keine `slide_event`.
+
+### 22.2 Freier Foliensatz und Vorschlag
+
+Ein Foliensatz ist **wählbar** für ein Modul, wenn er nicht gelöscht ist, zum Modul gehört und `ingest_state` nicht `fehler` ist. `neu` zählt mit: Ein eben geladener Satz darf vorgeschlagen werden, die Live-Ansicht zeigt bis zum Ende von `pdf.ingest` „Folien werden verarbeitet …“.
+
+Ein wählbarer Satz ist **frei**, wenn keine **andere**, nicht gelöschte Session im Zustand `geplant`, `bereit`, `laeuft`, `pausiert`, `beendet` oder `verarbeitet` ihn in `slide_deck_id` trägt. `verpasst` belegt nicht (der Satz wurde nicht gezeigt). Die anfragende Session selbst zählt nie. `slide_deck.session_id` spielt dabei keine Rolle.
+
+**Verfügbar seit** (`available_at`) = das größte `moodle_item.timemodified` unter den Moodle-Dateien, die auf den Satz zeigen (`moodle_item.slide_deck_id`, auch mit `removed_in_moodle_at`), sonst `slide_deck.uploaded_at`. `NULL`-Werte von `timemodified` zählen nicht: Sind alle `NULL` oder gibt es kein Item, gilt `uploaded_at`. Grund: Der erste Abgleich eines Kurses lädt alle Sätze in derselben Minute, `created_at` sagt dann nichts. Das Moodle-Datum sagt, wann der Dozent die Datei bereitgestellt hat.
+
+**Reihenfolge:** `available_at` absteigend, bei Gleichstand `id` absteigend.
+
+**Vorschlag** (`suggested_deck_id`) = der erste **freie** Satz dieser Reihenfolge, sonst `null`. Kein Vorschlag, wenn die Session schon einen nicht gelöschten Satz **dieses Moduls** hat (ein Satz eines anderen Moduls zählt wie ein gelöschter, siehe 22.3) oder abgeschlossen ist (22.4). **Ohne `session_id`** (spontaner Start, noch keine Session) gilt dieselbe Regel ohne die beiden Ausnahmen: Der Vorschlag ist der erste freie Satz des Moduls, „frei“ zählt dabei alle Sessions (22.3). Gibt es keinen freien Satz, ist er `null`.
+
+- **Ersetzter Termin (§9.2):** bleibt unverändert. Die neue Session erbt `slide_deck_id` der ersetzten. Die ersetzte ist gelöscht und belegt nichts.
+- **Fassungen:** Lädt Moodle eine geänderte Datei, entsteht ein neuer Satz, der alte bleibt (§17.4). Der Core kennt keine Verbindung zwischen beiden. Der neue Satz ist frei und kann darum Vorschlag der nächsten Vorlesung werden, obwohl er inhaltlich zur vorigen gehört. Das ist bekannt und in diesem Schnitt hingenommen: Der Vorschlag ist sichtbar und mit einem Klick änderbar. Eine Session wechselt nie von selbst auf eine neue Fassung.
+- **Gelöschter Satz an der Session:** Für Vorschlag und Anzeige zählt er wie „kein Satz“ (`current_deck_id = null`, ein Vorschlag ist möglich). Für die **Sperre** zählt der Zeiger `session.slide_deck_id`, auch wenn der Satz gelöscht ist: Gibt es nicht gelöschte `slide_event`, ist die Session gesperrt (22.4). Ohne `slide_event` darf `PATCH` wählen oder leeren, und der Upload hängt an (22.5). Wird der Satz aus dem Papierkorb wiederhergestellt und zeigt die Session noch darauf, ist er wieder ihr Satz. Hat sie inzwischen einen anderen, passiert nichts.
+- **Session aus dem Papierkorb** behält ihren Satz, auch wenn er inzwischen von einer anderen Session belegt ist. Belegt ist kein Fehler.
+
+### 22.3 `GET /modules/{id}/deck-options`
+
+Ein Abruf für alle drei Stellen (Start-Karte, spontaner Start, Live-Ansicht). Er hängt am Modul statt an der Session, weil der spontane Start (F-SES-04) vor dem Tipp noch keine Session hat. Kein Feld in `Session` und keine Erweiterung von `GET /slide-decks`: „frei“ hängt von der anfragenden Session ab und gehört nicht in die allgemeine Liste.
+
+| Methode und Pfad | Antwort | Fehler |
+|---|---|---|
+| `GET /modules/{id}/deck-options?session_id` | 200 `DeckOptions` | 404 `module_not_found`, 404 `session_not_found`, 400 `session_module_mismatch`, 400 `validation_failed` |
+
+`session_id`: ein leerer Wert gilt als nicht gesetzt, eine ungültige UUID ergibt `400 validation_failed`.
+
+Neue Typen in `session.schema.json` (Ticket F1, fünf Stück):
+
+| Typ | Felder |
+|---|---|
+| `DeckOptions` | `module_id`, `session_id` (UUID oder `null`), `current_deck_id` (UUID oder `null`), `suggested_deck_id` (UUID oder `null`), `lock` (`DeckLock` oder `null`), `items` (`DeckOption[]`) |
+| `DeckOption` | `deck` (`SlideDeck`), `available_at` (Zeitstempel), `source` (`DeckSource`), `free` (boolean), `used_by` (`DeckUse[]`, höchstens 3) |
+| `DeckUse` | `session_id` (UUID), `number` (Ganzzahl ab 1 oder `null`), `title` (Text oder `null`), Typen wie in `Session` |
+| `DeckSource` | `moodle` (mindestens eine Moodle-Datei zeigt auf den Satz), `upload` |
+| `DeckLock` | `folienwechsel`, `abgeschlossen` (Bedeutung in 22.4) |
+
+- `current_deck_id`: der nicht gelöschte Satz der Session **in diesem Modul**, sonst `null` (auch bei gelöschtem Satz, die Oberfläche behandelt das wie „kein Satz“). Zeigt der Zeiger auf einen Satz eines anderen Moduls (nach dem Umhängen durch `ensurePlannedSessions`), ist er ebenfalls `null`, der Satz taucht nicht in `items` auf. `lock` kommt weiter aus dem Zeiger.
+- `items`: alle wählbaren Sätze des Moduls in der Reihenfolge aus 22.2, höchstens 50, ohne Cursor. Der aktuelle Satz ist **immer** dabei, auch bei `ingest_state = fehler` und jenseits der 50 (mit `free: false`, wenn ihn eine andere Session belegt). Dasselbe gilt für den Vorschlag. `items` hat damit höchstens 51 Einträge, die Reihenfolge bleibt.
+- Ohne `session_id`: `current_deck_id = null`, `lock = null`, „frei“ zählt alle Sessions. `suggested_deck_id` ist der erste freie Satz des Moduls (22.2), sonst `null`. Ein Satz, den nur eine `verpasst`-Session trägt, gilt als frei.
+- `free` und `used_by` beziehen sich auf andere Sessions (22.2). `used_by` dient nur der Anzeige („schon in VL 6“): dieselbe Menge, die „frei“ blockiert (ohne `verpasst`), sortiert nach `coalesce(started_at, created_at)` absteigend, dann `id` absteigend, höchstens 3, keine Gesamtzahl. Ein eigener Typ `DeckUse` statt `SessionRef`, weil die Anzeige weder Modul noch Startzeit braucht.
+- `lock` wird aus dem Zeiger `session.slide_deck_id` gebildet (auch bei gelöschtem Satz), siehe 22.4.
+- Nur lesend, keine Sperre. Die Antwort ist eine Momentaufnahme. Verbindlich prüft erst der schreibende Weg (22.4).
+
+### 22.4 Setzen, wechseln, leeren: `PATCH /sessions/{id}`
+
+`SessionUpdate` bleibt unverändert (`title`, `slide_deck_id`). Für `title` allein gilt alles wie bisher, in jedem Zustand und ohne die Regeln unten. Enthält der Body `slide_deck_id` (UUID oder `null`), gilt die erste zutreffende Zeile:
+
+| Lage | Ergebnis |
+|---|---|
+| Wert gleich dem aktuellen | 200, der Satz bleibt, dafür kein Ereignis (auch in abgeschlossenen Sessions und bei Sperre). Ein gleichzeitig gesendeter anderer `title` wird gesetzt, mit eigenem Ereignis |
+| Zustand `beendet`, `verarbeitet` oder `verpasst` | 409 `slide_deck_session_closed`, `details.state` |
+| Zeiger `slide_deck_id` gesetzt (auch auf einen gelöschten Satz) **und** mindestens ein nicht gelöschtes `slide_event` | 409 `slide_deck_locked`, `details: { slide_deck_id, slide_events }` |
+| Neuer Satz fehlt oder ist gelöscht | 404 `slide_deck_not_found` (ein Satz mit `ingest_state = fehler` ist erlaubt, nur die Liste bietet ihn nicht an) |
+| Neuer Satz gehört zu einem anderen Modul | 400 `slide_deck_module_mismatch` |
+| sonst (`geplant`, `bereit`, `laeuft`, `pausiert`) | 200 `Session`, Ereignis `session.updated` |
+
+- **`geplant` gehört dazu**, weil die Start-Karte schon vor `bereit` starten und wählen lässt (§9.1).
+- **Warum die Sperre am ersten Folienwechsel hängt:** `slide_event.slide_index` und `slide_id` meinen Folien des Satzes, der beim Wechsel galt. `align.log` löst den Index gegen den Satz der Session auf (§18.3 Schritt 5), und Seiten, die das iPad „auf die Folie“ schreibt, hängen an Folien dieses Satzes. Ein anderer Satz würde alle bisherigen Wechsel still umdeuten. Vor dem ersten Wechsel gibt es nichts umzudeuten. Eine falsche Wahl lässt sich also korrigieren, solange nicht geblättert wurde. Danach hilft erst die spätere Stufe (Plan §7).
+- **`title` und `slide_deck_id` im selben Body:** alles oder nichts in einer Transaktion. `session.updated` genau einmal und nur, wenn sich etwas geändert hat (auch ein reines `title`-`PATCH` mit gleichem Titel sendet nichts).
+- **Von „kein Satz“ aus (Zeiger `null`) gibt es keine Sperre**, auch wenn `slide_event` vorliegen (nur über fremde Clients denkbar, 22.1): `align.log` löst sie über den Index auf. Was fehlt, zählt als `unresolved_events`.
+- **`lock` in `DeckOptions`** sagt dasselbe voraus: `abgeschlossen` für die zweite Zeile, `folienwechsel` für die dritte (aus dem Zeiger, auch bei gelöschtem Satz), sonst `null`.
+- **Belegt ist kein Fehler.** Ein Satz, den eine andere Session trägt, darf gewählt werden.
+- **Sperren (§16.2):** `lockSessionTransitions` → Session-Zeile `FOR NO KEY UPDATE` → `sync_stream`-Zeile von `session:<id>` (anlegen, falls sie fehlt, dann `FOR UPDATE`, wie `appendOp`) → `slide_event` zählen → `slide_deck`-Zeilen (alter und neuer Satz, nach `id` aufsteigend, **nur nicht gelöschte**: Ein gelöschter alter Satz wird weder gesperrt noch angefasst, sonst verklemmt sich `PATCH` mit dem endgültigen Löschen des Satzes aus dem Papierkorb, dessen `ON DELETE SET NULL` die Session-Zeile braucht, `40P01`). Ein gelöschter oder fehlender neuer Satz bleibt 404. Die Strom-Sperre hält ein gleichzeitiges `slide.change` zurück, bis der Wechsel entschieden ist. `PATCH` nur mit `title` nimmt weiter keine dieser Sperren.
+- **Wirkung:** `session.slide_deck_id` setzen, `updated_at` nach §11.6. Neuer Satz: `linkDeckToSession`. Alter Satz: `slide_deck.session_id = NULL`, falls er nicht gelöscht ist und auf diese Session zeigte (22.1). `session.updated` über `emitUpdated`.
+- **Keine Sync-Operation.** Es gibt kein `session.update` im Strom, und das iPad setzt keine Folien. Clients erfahren die Änderung nur über `session.updated` bzw. `GET /sessions`. Soll das iPad später Folien wählen, bekommt das einen eigenen Vertrag.
+- **Verspätete `slide.change`** (Warteschlange eines Tabs, der noch den alten Stand hatte) nimmt der Core weiter in jedem Zustand an (§9.1). Sie können einen Index des alten Satzes tragen. Das Fenster ist klein (die Sperre gilt ab dem ersten angekommenen Wechsel) und wird hingenommen. Die Web-App verwirft beim Wechsel des Satzes ihre lokale Folienposition und sendet erst wieder, wenn der neue Satz geladen ist.
+
+**Start (`POST /sessions/{id}/start`) und `POST /sessions`:** unverändert. `slide_deck_id` im Start setzt den Satz **nur, wenn die Session noch keinen gültigen Satz hat** (Zeiger `null`, Satz gelöscht oder aus einem anderen Modul, wie „kein Satz“ in 22.2). Hat sie schon einen, wird das Feld ignoriert: 200, die Session behält ihren Satz, kein Fehler. Dasselbe gilt für ein Geräte-`session.start` über Sync auf eine bekannte Session (§9, gleicher Code-Pfad `startSession`). Grund: Die Web-App schickt den Vorschlag mit, den sie beim Laden sah. Hat inzwischen ein anderer Weg einen Satz gesetzt (anderer Tab, Modulseite, Upload), würde der veraltete Vorschlag ihn überschreiben, und die Web-App kann das nicht ohne Blockieren ausschließen. Die ausdrückliche Wahl läuft allein über `PATCH`. Der mitgeschickte Satz wird nur geprüft (404 `slide_deck_not_found`, 400 `slide_deck_module_mismatch`), wenn er tatsächlich gesetzt würde: Ein ignorierter Wert braucht keinen Fehler, und ein veralteter Vorschlag (inzwischen gelöschter Satz) soll den Start nicht scheitern lassen. Die Prüfung liest nur, sie nimmt keine neue Sperre. Ein fehlender oder leerer Wert lässt den vorhandenen Satz stehen, ein Start auf `laeuft`/`pausiert` ändert ihn nicht. Das Setzen in `geplant`/`bereit` braucht keine Sperrprüfung: Dort existiert noch kein `slide_event`. `POST /sessions` (spontaner Start) legt eine neue Session an, es gibt keinen Bestand: Der Satz wird gesetzt und wie oben geprüft. Der Core wählt **nie selbst** einen Vorschlag: Die Web-App schickt ihn mit (22.7). So sieht der Nutzer vorher, womit gestartet wird, und der Offline-Start des iPads (§9.2) bleibt unberührt.
+
+### 22.5 Upload in eine Session: `POST /slide-decks` mit `session_id`
+
+Bisher: Hat die Session noch keinen Satz, bekommt sie den hochgeladenen bzw. die vorhandene Dublette. Hat sie schon einen, wird **nichts ersetzt**, der Satz wird nur angelegt. Ersetzen ist immer ein eigener, sichtbarer Schritt über `PATCH` (22.4). So gelten Sperre und Fehlercodes des Wechsels an genau einer Stelle.
+
+Neu:
+
+- **Zeiger auf einen gelöschten Satz:** Zeigt `session.slide_deck_id` auf einen gelöschten Satz und gibt es **kein** nicht gelöschtes `slide_event`, hängt der Upload an (der Zeiger gilt als „kein Satz“). Mit `slide_event` bleibt der Zeiger, der Satz wird nur angelegt. Der gelöschte Satz wird dabei nicht angefasst (auch `slide_deck.session_id` bleibt, 22.1).
+- **Abgeschlossene Session:** `session_id` einer Session in `beendet`, `verarbeitet` oder `verpasst` → 409 `slide_deck_session_closed`, **bevor** die Datei abgelegt wird. Es entsteht kein Satz. Nachträgliches Zuordnen ist die spätere Stufe. Unbekannte Session 404 `session_not_found`, anderes Modul 400 `session_module_mismatch`, wie bisher.
+- **Sperren:** Mit `session_id` nimmt der Upload zuerst `lockSessionTransitions` und die Session-Zeile (`FOR NO KEY UPDATE`), danach die Advisory-Sperre der Datei (`deck:<module_id>:<sha256>`) und die `slide_deck`-Zeilen. Hängt er an einen gelöschten Zeiger an, nimmt er vor dem Zählen der `slide_event` die `sync_stream`-Zeile von `session:<id>` (Reihenfolge wie `PATCH`). Er sperrt keinen gelöschten Satz (22.4): Beim Anhängen an einen gelöschten Zeiger bleibt dieser Satz unberührt, damit sich der Upload nicht mit dem endgültigen Löschen des Satzes verklemmt (`40P01`). Ohne `session_id` ändert sich nichts.
+- **Keine lange Sperre:** Die Datei ist beim Aufruf schon vollständig im Datenordner (Stream und Hash laufen vorher, ohne Sperre). Die Transaktion mit den Sperren umfasst nur Dublettenprüfung, Einhängen, Verschieben der Datei und Anlegen des Jobs. Die globale Sperre `lockSessionTransitions` gilt nie für die Dauer des Uploads.
+
+Ob der Upload die Session bekommen hat, liest der Client aus `Session.slide_deck_id` (`GET /sessions/{id}` bzw. `session.updated`), nicht aus `UploadResult`.
+
+### 22.6 Moodle
+
+- **Der Abgleich verknüpft nichts.** `createSlideDeck` bleibt dort ohne `session_id`. Ein neuer Satz ist frei und erscheint damit von selbst als Vorschlag (22.2). Kein Flag an Session oder Satz, kein neues Sync-Ereignis.
+- **Wie die Live-Ansicht davon erfährt:** Solange die offene Session `laeuft` oder `pausiert` ist und keinen Satz hat, fragt die Web-App `GET /modules/{id}/deck-options?session_id` ab: beim Öffnen, nach jedem Neuverbinden des Sync-Clients, wenn der Tab sichtbar wird, und sonst alle 60 s (nur im sichtbaren Tab). Der Core läuft lokal, die Abfrage ist billig. Ein eigenes Ereignis wäre eine Änderung am Sync-Protokoll für alle Clients und lohnt hier nicht. Hat die Session einen Satz, fragt die Live-Ansicht nicht mehr.
+- **Abgleich zur Vorlesung (neu):** Damit Folien, die der Dozent kurz vorher hochlädt, rechtzeitig da sind, stößt der Core für die Kurse des Moduls (`moodle_course_link` mit `sync_enabled`) einen Abgleich an:
+  1. beim Übergang `geplant → bereit` (15 min vor Beginn),
+  2. beim Start einer Session (REST oder Geräte-Start über den Sync),
+  3. im Core-Takt alle 10 min, solange eine Session des Moduls `laeuft` oder `pausiert` ist und keinen Satz hat.
+
+  Anstoß 1 und 2 gibt es nur, wenn die Session keinen (nicht gelöschten) Satz hat. Eine Drossel im Speicher je Modul lässt höchstens alle 10 min einen Anstoß zu, gemessen ab dem letzten Anstoß.
+- **Regeln dafür:** `MoodleSync.run` mit den Kursen des Moduls und dem neuen Wert `vorlesung` in `MoodleSyncTrigger` (`moodle.schema.json`). Es gilt §17.4 (ein Lauf gleichzeitig, sonst angehängt, kein Lauf ohne gültigen Zugang). Der Anstoß läuft **nach** dem Commit des Übergangs, wartet nicht auf das Ergebnis und kann Start und Takt weder verzögern noch scheitern lassen. Fehler stehen nur im Status des Abgleichs (§17.3). Wie die Statusanzeige den Anlass `vorlesung` zeigt, legt F3 fest.
+- **Angebot statt Wechsel:** Kein Weg setzt einer Session von selbst einen Satz. Das Angebot (22.7) übernimmt der Nutzer mit einem Klick, über `PATCH`.
+
+### 22.7 Web (verbindliche Eckpunkte)
+
+Texte ruhig, ohne Rot, ohne Zähler, ohne Ausrufezeichen (LP9, 07 §2). Jede Wahl geht mit der Tastatur, der Fokus ist sichtbar, Ziele sind mindestens 44 px hoch, Statuszeilen haben `role="status"` wie in den vorhandenen Bereichen.
+
+- **Start-Karte (Heute).** Für die Karte mit Start-Knopf (`bevorstehend`, `bereit`) lädt die Web-App `deck-options` der Session. Eine Zeile unter dem Titel:
+  - Session hat einen Satz: „Folien: ‹Titel›“.
+  - sonst mit Vorschlag: „Folien: ‹Titel›“, bei `source = moodle` mit dem Zusatz „aus Moodle“.
+  - sonst: „Ohne Folien“.
+  - Daneben **ein** Knopf „Ändern“. Er klappt in der Karte eine Liste auf (kein Dialog): die Sätze aus `items` (belegte mit „schon in VL n“), „Ohne Folien“ und „PDF hochladen …“. `Esc` schließt, der Fokus geht zurück auf „Ändern“.
+  - Eine ausdrückliche Wahl speichert sofort: Satz → `PATCH` mit der ID. „Ohne Folien“ → `PATCH` mit `null`, falls die Session einen Satz hat, und in jedem Fall ein Merker im `sessionStorage` (`sg.folien.ohne.<session_id>`), damit der Vorschlag nicht mitgeschickt wird.
+  - **Start:** ein Tipp, kein Dialog. Hat die Session keinen Satz, gibt es einen Vorschlag und keinen Merker „Ohne Folien“, schickt die Karte `slide_deck_id = suggested_deck_id` im Start mit. Sonst startet sie ohne das Feld. Ist der Vorschlag veraltet und die Session hat inzwischen einen Satz (anderer Tab, Modulseite, Upload), ignoriert der Core das Feld (22.4): Der vorhandene Satz bleibt, die Karte muss nichts prüfen.
+  - **Der Start wartet nie auf die Folien.** Sind die Optionen noch nicht geladen oder gescheitert, startet der Tipp ohne Satz (die Zeile zeigt dann nichts). Antwortet der Start mit 404 `slide_deck_not_found` oder 400 `slide_deck_module_mismatch`, wiederholt die Karte ihn einmal ohne `slide_deck_id`. Die Live-Ansicht bietet die Folien danach an.
+- **Spontaner Start (F-SES-04).** `deck-options` ohne `session_id` für das gewählte Modul. Der Vorschlag steht als Zeile unter dem Modul und geht als `slide_deck_id` in `POST /sessions` mit. „Ohne Folien“ ist auch hier ein Klick. Keine Liste: Wer einen anderen Satz will, wählt ihn in der Live-Ansicht.
+- **Live-Ansicht ohne Satz** (`SlidesPanel`, bisher nur der Hinweis „Folien kommen später – einfach mitschreiben“). Der Hinweis bleibt. Darunter stehen:
+  - das Angebot, wenn es einen Vorschlag gibt. Bei `source = moodle` und `available_at` nach `started_at`: „Neue Folien aus Moodle: ‹Titel›“, sonst „Vorschlag: ‹Titel›“. Dazu „Übernehmen“ und „Nicht jetzt“. „Nicht jetzt“ blendet diesen Satz für diese Session aus (`sessionStorage`), ein noch neuerer Satz wird wieder angeboten. Die Zeile ist `role="status"`, nimmt nie den Fokus und unterbricht das Mitschreiben nicht;
+  - „Folien wählen“ (dieselbe Liste wie auf der Start-Karte) und „PDF hochladen“ (`POST /slide-decks` mit `session_id`, 22.5).
+- **Live-Ansicht, Satz gelöscht** (`current_deck_id = null`, aber die Session hatte einen): ein ruhiger Satz „Die Folien dieser Vorlesung sind gelöscht.“, dazu „Folien wählen“, solange `lock = null`. Bei `lock = folienwechsel` steht nur der Satz.
+- **Live-Ansicht mit Satz.** Solange `lock = null` ist, bietet die Folien-Spalte „Anderen Foliensatz wählen“ und „Ohne Folien“. Nach dem ersten Folienwechsel entfällt beides. Antwortet `PATCH` trotzdem mit `slide_deck_locked` (ein anderer Tab hat geblättert), steht ruhig: „Der Foliensatz bleibt, weil in dieser Vorlesung schon geblättert wurde.“
+- **Kein automatisches `slide.change` beim Setzen.** Es würde den Satz sofort sperren (22.4) und eine falsche Wahl unkorrigierbar machen. Vor dem ersten Wechsel zeigt der Mac Folie 1, wie bisher.
+- **Modulseite, Upload von Folien.** Der Upload bekommt ein optionales Feld „Für Vorlesung“: die Sessions des Moduls in `geplant`, `bereit`, `laeuft`, `pausiert` von heute, die noch keinen Satz haben (Standard: die laufende, sonst „keine“). Gewählt → `session_id` im Upload. Sessions mit Satz stehen nicht zur Wahl, ersetzt wird nur in der Live-Ansicht.
+- **Nach jeder Änderung** gilt `Session` aus der Antwort bzw. `session.updated` (Schutz über `updated_at`, §11.6). `deck-options` wird danach neu geladen.
+
+### 22.8 iPad
+
+**Keine Änderung nötig** (Stand des Codes vom 17.11.2026, nicht am Gerät geprüft): `SessionFollower` übernimmt jede neuere Fassung der verfolgten Session aus `session.updated` (`running = brief`, `onChange`), `InkLibraryService.follow` reicht `slideDeckID` weiter, `SlideDeckStore` lädt den Satz der laufenden Session bei Bedarf und schützt ihn vor dem Verdrängen. Das gilt auch für das Setzen mitten in der Vorlesung und für das Leeren.
+
+- „Auf die Folie schreiben“ bleibt wie bisher erst nach dem **ersten** `slide.change` verfügbar (`slideKnown`, #268). Bekommt eine laufende Session Folien, gilt das genauso: Bis der Mac einmal blättert, schreibt das iPad auf freie Seiten.
+- Ein Wechsel des Satzes ist nur vor dem ersten Folienwechsel möglich (22.4). Das iPad kennt bis dahin keine aktuelle Folie und hat keine Seite an eine Folie des alten Satzes gehängt.
+- Ticket F4 (22.11) sichert das nur mit Tests ab.
+
+### 22.9 `align.log` und Verarbeitung
+
+Keine Änderung am Worker. Für eine Session, die erst nach einigen Minuten Folien bekommen hat, gilt §18.3 unverändert:
+
+- Maßgeblich ist der Satz, den die Session **beim Lauf von `align.log`** trägt. Wann er gesetzt wurde, speichert der Core nicht.
+- Die Zeit vor dem ersten stabilen Folienwechsel gehört zu dessen Folie (§18.3 Schritt 7), also auch die Minuten ohne Folien. Ohne jeden Wechsel liegt die ganze Session auf Folie 1 (`mode = ohne_wechsel`).
+- Das ist ungenau, aber dieselbe Näherung wie bei jeder Session, in der spät zum ersten Mal geblättert wird. Genauer wird es erst mit `align.content` (spätere Stufe).
+
+### 22.10 Neue Fehlercodes
+
+| Code | HTTP | Bedeutung |
+|---|---|---|
+| `slide_deck_locked` | 409 | Die Session hat einen Foliensatz und schon Folienwechsel. Wechseln und Leeren gehen nicht mehr (`details.slide_deck_id`, `details.slide_events`) |
+| `slide_deck_session_closed` | 409 | Foliensatz setzen, wechseln, leeren oder in die Session hochladen bei `beendet`, `verarbeitet`, `verpasst` (`details.state`) |
+
+`slide_deck_not_found`, `slide_deck_module_mismatch`, `session_not_found`, `session_module_mismatch`, `module_not_found` und `validation_failed` gelten wie bisher.
+
+### 22.11 Tickets und Besitz
+
+| Ticket | Inhalt | Besitzt (Dateien) | Abhängig von |
+|---|---|---|---|
+| **F1** (Core + Schemas) | `DeckOptions`, `DeckOption`, `DeckUse`, `DeckSource`, `DeckLock` samt Beispielen. `GET /modules/{id}/deck-options` (22.2, 22.3). Regeln und Sperren für `PATCH /sessions/{id}` (22.4). Upload mit `session_id`: Zustand und Sperr-Reihenfolge (22.5). Nachträge in §7.2 und §15 | `packages/schemas/src/session.schema.json`, `packages/schemas/examples/**`, generierte Dateien, `services/core/src/services/sessions.ts`, neu `services/core/src/services/deck-options.ts`, `services/core/src/routes/{sessions,organisation}.ts`, in `services/core/src/services/material.ts` und `routes/material.ts` nur der Weg mit `session_id`, Tests (auch Nebenläufigkeit: `PATCH` gegen `slide.change`, `PATCH` gegen Upload, kein `40P01`), dieser Abschnitt | – |
+| **F2** (Web) | Start-Karte, spontaner Start, Live-Ansicht ohne und mit Satz, Upload auf der Modulseite (22.7) | `apps/web/src/components/today/{StartCard,SpontaneousStart}.tsx`, neu `apps/web/src/components/slides/DeckPicker.tsx`, `apps/web/src/components/dashboard/slides/**`, `apps/web/src/lib/{sessions,material}.ts`, `apps/web/src/lib/uploads.tsx`, in `MaterialPanel.tsx` nur das Feld „Für Vorlesung“, in `apps/web/test/fake-core.ts` nur die Routen aus 22.3 bis 22.5, Tests | F1 (gegen Beispiele und Fake-Core baubar, Merge nach F1) |
+| **F3** (Core, Moodle) | Abgleich zur Vorlesung: Wert `vorlesung` in `MoodleSyncTrigger`, die drei Anstöße (22.6) | `packages/schemas/src/moodle.schema.json` (nur der Enum-Wert), generierte Dateien, `services/core/src/moodle/**` (Einstieg für den Anstoß), in `services/core/src/services/sessions.ts` nur die Aufrufe nach dem Commit von Takt und Start, Anzeige des neuen Anlasses in der Web-App (`lib/moodle.ts`), Tests | F1 (gleiche Datei `sessions.ts`, darum nacheinander) |
+| **F4** (iPad, nur Tests) | Tests für `SessionFollower` und `InkLibraryService`: `session.updated` setzt, wechselt und leert `slide_deck_id` der laufenden Session | `apps/ipad/Tests/**` | – |
+| **F5** | Ende-zu-Ende-Test (Start mit Vorschlag, Wahl in der Live-Ansicht, Sperre nach dem ersten Wechsel), Nachtrag in `docs/anleitungen/`, Prüfliste für den Owner | `tests/`, `docs/anleitungen/` | F1 bis F3 |
+
+**Review:** F1 und F3 durch einen frischen Opus-Subagent (Sperren, Zustandsautomat), F2 ebenfalls Opus (Logik am Start), F4 und F5 Sonnet.
+
+**Nur der Owner kann testen:** ob der Vorschlag im Alltag stimmt (22.2: Fassungen, Dozenten, die alles vorab hochladen), ob das Angebot aus Moodle im Hörsaal rechtzeitig kommt, und ob das iPad die Folien einer laufenden Vorlesung ohne Neustart zeigt.

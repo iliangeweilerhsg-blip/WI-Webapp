@@ -844,6 +844,94 @@
         }
       }
     },
+    "DeckSource": {
+      "type": "string",
+      "enum": ["moodle", "upload"],
+      "description": "Herkunft eines wählbaren Foliensatzes (VERTRAEGE §22.3): moodle = mindestens eine Moodle-Datei zeigt auf den Satz"
+    },
+    "DeckLock": {
+      "type": "string",
+      "enum": ["folienwechsel", "abgeschlossen"],
+      "description": "Warum der Foliensatz einer Session nicht gesetzt oder gewechselt werden kann (§22.4): abgeschlossen = Session beendet/verarbeitet/verpasst, folienwechsel = Satz vorhanden und schon slide_event"
+    },
+    "DeckUse": {
+      "type": "object",
+      "description": "Kurzangabe einer Session, die einen Foliensatz belegt (\"schon in VL 6\", §22.3)",
+      "required": ["session_id", "number", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": { "$ref": "#/$defs/Uuid" },
+        "number": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "VL-Nummer (Session.number)"
+        },
+        "title": { "type": ["string", "null"] }
+      }
+    },
+    "DeckOption": {
+      "type": "object",
+      "description": "Ein wählbarer Foliensatz mit Verfügbarkeit (§22.3)",
+      "required": ["deck", "available_at", "source", "free", "used_by"],
+      "additionalProperties": false,
+      "properties": {
+        "deck": {
+          "$ref": "#/$defs/SlideDeck"
+        },
+        "available_at": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Größtes moodle_item.timemodified der Moodle-Dateien des Satzes, sonst slide_deck.uploaded_at"
+        },
+        "source": {
+          "$ref": "#/$defs/DeckSource"
+        },
+        "free": {
+          "type": "boolean",
+          "description": "Keine andere nicht gelöschte Session in geplant, bereit, laeuft, pausiert, beendet oder verarbeitet trägt den Satz"
+        },
+        "used_by": {
+          "type": "array",
+          "maxItems": 3,
+          "description": "Andere Sessions, die den Satz tragen und ihn belegen (wie free), nach coalesce(started_at, created_at) absteigend, dann id, höchstens 3 (nur zur Anzeige, keine Gesamtzahl)",
+          "items": {
+            "$ref": "#/$defs/DeckUse"
+          }
+        }
+      }
+    },
+    "DeckOptions": {
+      "type": "object",
+      "description": "GET /modules/{id}/deck-options?session_id (§22.3). Momentaufnahme, verbindlich prüft erst PATCH /sessions/{id}",
+      "required": ["module_id", "session_id", "current_deck_id", "suggested_deck_id", "lock", "items"],
+      "additionalProperties": false,
+      "properties": {
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "session_id": {
+          "anyOf": [{ "$ref": "#/$defs/Uuid" }, { "type": "null" }]
+        },
+        "current_deck_id": {
+          "anyOf": [{ "$ref": "#/$defs/Uuid" }, { "type": "null" }],
+          "description": "Nicht gelöschter Satz der Session, sonst null (auch ohne session_id und bei gelöschtem Satz)"
+        },
+        "suggested_deck_id": {
+          "anyOf": [{ "$ref": "#/$defs/Uuid" }, { "type": "null" }],
+          "description": "Erster freier Satz in der Reihenfolge von items, sonst null. Auch ohne session_id (spontaner Start). Null, wenn die Session schon einen Satz dieses Moduls hat oder abgeschlossen ist"
+        },
+        "lock": {
+          "anyOf": [{ "$ref": "#/$defs/DeckLock" }, { "type": "null" }]
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 51,
+          "description": "Wählbare Sätze, available_at absteigend, dann id absteigend, höchstens 50. Der aktuelle Satz ist immer dabei (auch bei fehler und jenseits der 50), ebenso der Vorschlag (dann bis zu 51 Einträge)",
+          "items": {
+            "$ref": "#/$defs/DeckOption"
+          }
+        }
+      }
+    },
     "SessionStartOffset": {
       "type": "object",
       "description": "Ein Gerät hat die Session offline mit eigenem started_at begonnen. offset_ms = started_at des Geräts − started_at der Session (ms). Die t_ms der Operationen dieses Geräts bleiben unverändert; Sitzungszeit nach Serveruhr = t_ms + offset_ms. Der Core liefert sie umgerechnet mit (Marker.t_session_ms, Photo.t_session_ms, PageStrokes.stroke_offsets_ms, VERTRAEGE §9.3).",

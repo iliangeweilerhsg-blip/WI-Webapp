@@ -15,13 +15,13 @@ import {
 } from '@sg/shared';
 import type { Db, Tx } from '../db/client.ts';
 import { notDeleted } from '../db/schema/common.ts';
-import { courseModule, exerciseSheet, session, slide, slideDeck } from '../db/schema/index.ts';
+import { courseModule, exerciseSheet, slide, slideDeck } from '../db/schema/index.ts';
 import { HttpError } from '../errors.ts';
 import { afterCursor, cursorTs, decodeCursor, keysetOrder, toPage } from '../lib/pagination.ts';
 import { uuidv7 } from '../lib/uuid7.ts';
 import { enqueueJob } from './jobs.ts';
 import { ensureSearchIndexJob } from './search-backfill.ts';
-import { attachDeckToSession } from './sessions.ts';
+import { attachDeckToSession, lockSessionForDeckUpload } from './sessions.ts';
 import { softDeleteWithOps } from './trash-ops.ts';
 
 /** Eine fertig gespeicherte Upload-Datei (temporär, im Datenordner, damit `rename` atomar ist) */
@@ -137,17 +137,6 @@ async function requireModule(db: Db, moduleId: string): Promise<void> {
   if (!row) throw new HttpError(404, 'module_not_found', 'Das Modul wurde nicht gefunden.');
 }
 
-async function requireSession(db: Db, sessionId: string, moduleId: string): Promise<void> {
-  const [row] = await db
-    .select({ id: session.id, moduleId: session.moduleId })
-    .from(session)
-    .where(and(eq(session.id, sessionId), notDeleted(session)));
-  if (!row) throw new HttpError(404, 'session_not_found', 'Die Session wurde nicht gefunden.');
-  if (row.moduleId !== moduleId) {
-    throw new HttpError(400, 'session_module_mismatch', 'Die Session gehört zu einem anderen Modul.');
-  }
-}
-
 interface PlaceOptions {
   dataDir: string;
   /** `decks` oder `sheets` */
@@ -196,6 +185,10 @@ async function createMaterial(
   let placed = false;
   try {
     return await db.transaction(async (tx) => {
+      // Mit Session zuerst deren Sperren (Zustandswechsel → Session-Zeile), erst danach die Sperre der Datei und die
+      // Satz-Zeilen: gleiche Reihenfolge wie `PATCH /sessions/{id}` (VERTRAEGE §22.5). Abgeschlossene Session: 409,
+      // bevor die Datei abgelegt wird.
+      if (sessionId) await lockSessionForDeckUpload(tx, sessionId, moduleId);
       await tx.execute(
         sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${kind}:${moduleId}:${upload.sha256}`}, 0))`,
       );
@@ -240,7 +233,6 @@ export async function createSlideDeck(
   input: DeckUploadInput,
 ): Promise<UploadResult> {
   await requireModule(db, input.moduleId);
-  if (input.sessionId) await requireSession(db, input.sessionId, input.moduleId);
   return createMaterial(
     db,
     dataDir,
