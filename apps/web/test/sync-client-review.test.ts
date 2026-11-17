@@ -454,10 +454,13 @@ describe('Mehrere Tabs: nur der Leader synchronisiert', () => {
     expect(a.leader).toBe(true);
     expect(b.leader).toBe(false);
     expect(b.connectionState).toBe('other_tab');
-    expect(server.sockets).toHaveLength(1);
+    // b hält nur eine Mitlese-Verbindung (§11.8): Abos und Ereignisse, nie die Warteschlange
+    expect(server.sockets).toHaveLength(2);
+    expect(b.linkState).toBe('online');
     await expect(b.send(notebookCreate(1))).rejects.toBeInstanceOf(SyncNotLeaderError);
     expect(await store.list()).toHaveLength(0);
     await expect(a.send(notebookCreate(1))).resolves.toBeTruthy();
+    expect(server.sockets[1]!.of('op')).toHaveLength(0);
   });
 
   it('Hier übernehmen: Leader wechselt, der alte trennt sauber, die Warteschlange geht vom neuen Leader raus', async () => {
@@ -477,12 +480,16 @@ describe('Mehrere Tabs: nur der Leader synchronisiert', () => {
     expect(b.leader).toBe(true);
     expect(a.leader).toBe(false);
     expect(a.connectionState).toBe('other_tab');
-    expect(server.sockets).toHaveLength(2);
+    // a: Leader-Verbindung zu, jetzt Mitlese-Verbindung; b: Mitlese-Verbindung zu, jetzt Leader-Verbindung
+    expect(server.sockets).toHaveLength(4);
     expect(server.sockets[0]!.closedByClient).toBe(1000);
+    expect(server.sockets[1]!.closedByClient).toBe(1000);
+    expect(server.sockets.filter((s) => s.closedByClient === null)).toHaveLength(2);
     const handed = await pa;
     expect(handed).toBeInstanceOf(SyncHandedOverError);
     expect((handed as SyncHandedOverError).queued).toBe(true);
-    expect(server.sockets[1]!.of('op').map((m) => m.op_id)).toEqual([uid(960)]);
+    const sent = server.sockets.slice(1).map((s) => s.of('op').map((m) => m.op_id));
+    expect(sent.flat()).toEqual([uid(960)]); // genau einmal, über die neue Leader-Verbindung
     expect(b.pendingCount).toBe(0);
     expect(await store.list()).toHaveLength(0);
     await expect(a.send(notebookCreate(2))).rejects.toBeInstanceOf(SyncNotLeaderError);
@@ -507,7 +514,10 @@ describe('Mehrere Tabs: nur der Leader synchronisiert', () => {
     a.disconnect();
     await settle();
     expect(b.leader).toBe(true);
-    expect(server.sockets).toHaveLength(2);
+    // Leader a, Mitlesen b, dann Leader b; offen ist nur noch die Leader-Verbindung von b
+    expect(server.sockets).toHaveLength(3);
+    expect(server.sockets.filter((s) => s.closedByClient === null)).toHaveLength(1);
+    expect(b.connectionState).toBe('online');
   });
 
   it('disconnect und connect im selben Tab funktionieren (auch direkt hintereinander, StrictMode)', async () => {
@@ -539,6 +549,88 @@ describe('Mehrere Tabs: nur der Leader synchronisiert', () => {
     a.disconnect();
     await settle();
     expect(b.leader).toBe(true);
+  });
+});
+
+describe('Mitlese-Verbindung im Folge-Tab (§11.8, Owner-Meldung 17.11.)', () => {
+  it('Folge-Tab bekommt Operationen seiner Abos und Ereignisse, sendet aber nie die Warteschlange', async () => {
+    const locks = new FakeLocks();
+    const a = make({ leaderLock: locks.create });
+    const b = make({ leaderLock: locks.create });
+    await a.connect();
+    await b.connect();
+    await settle();
+    const got: number[] = [];
+    b.subscribe(nbStream(1), { lastSeq: 0, lastOpId: null }, (op) => got.push(op.seq!));
+    const presence: unknown[] = [];
+    b.onEvent('presence', (p) => presence.push(p));
+    await settle();
+    const follow = server.sockets[1]!;
+    expect(follow.of('subscribe').map((m) => m.streams)).toEqual([
+      [{ stream: nbStream(1), last_seq: 0, last_op_id: null }],
+    ]);
+    follow.push(server.addForeign(nbStream(1), 'page.delete', { data: { page_id: uid(77) } }));
+    follow.push({
+      type: 'event',
+      name: 'presence',
+      data: {
+        client: 'ipad',
+        device_id: uid(50),
+        device_name: 'iPad',
+        session_id: null,
+        notebook_id: uid(1),
+        page_id: uid(5),
+      },
+    });
+    await settle();
+    expect(got).toEqual([1]);
+    expect(presence).toHaveLength(1);
+    expect(b.connectionState).toBe('other_tab');
+    expect(b.linkState).toBe('online');
+    await expect(b.send(notebookCreate(1))).rejects.toBeInstanceOf(SyncNotLeaderError);
+    await settle();
+    expect(follow.of('op')).toHaveLength(0);
+  });
+
+  it('Folge-Tab schreibt die db_epoch nicht (sonst verdeckte er dem Leader einen Epochenwechsel)', async () => {
+    const locks = new FakeLocks();
+    const storeA = new MemoryQueueStore();
+    const storeB = new MemoryQueueStore();
+    const a = make({ leaderLock: locks.create, store: storeA });
+    const b = make({ leaderLock: locks.create, store: storeB });
+    await a.connect();
+    await b.connect();
+    await settle();
+    expect(b.linkState).toBe('online');
+    expect(await storeA.getMeta('db_epoch')).toBe(server.dbEpoch);
+    expect(await storeB.getMeta('db_epoch')).toBeNull();
+  });
+
+  it('Mitlese-Verbindung bricht ab: neu verbinden mit Position, der Tab bleibt other_tab', async () => {
+    const locks = new FakeLocks();
+    const a = make({ leaderLock: locks.create });
+    const b = make({ leaderLock: locks.create });
+    await a.connect();
+    await b.connect();
+    await settle();
+    const op = server.addForeign(nbStream(1), 'page.delete', { data: { page_id: uid(77) } });
+    b.subscribe(nbStream(1), { lastSeq: 1, lastOpId: op.op_id as string }, () => undefined);
+    await settle();
+    const links: string[] = [];
+    const states: string[] = [];
+    b.onEvent('link', (l) => links.push(l.state));
+    b.onEvent('connection', (c) => states.push(c.state));
+    server.sockets[1]!.serverClose(4503);
+    await settle();
+    expect(b.linkState).toBe('backoff');
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    expect(b.linkState).toBe('online');
+    expect(links).toEqual(['backoff', 'connecting', 'syncing', 'online']);
+    expect(states).toEqual([]);
+    expect(server.last.of('hello')[0]!.streams).toEqual([
+      { stream: nbStream(1), last_seq: 1, last_op_id: op.op_id },
+    ]);
   });
 });
 

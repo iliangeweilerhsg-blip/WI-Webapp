@@ -10,7 +10,7 @@ import type { SyncClient } from '../../lib/sync/client.ts';
 import { InkPage } from './InkPage.tsx';
 
 /** Was die Spalte vom Sync-Client braucht (der echte `SyncClient` passt). */
-export type InkSyncSource = Pick<SyncClient, 'subscribe' | 'onEvent' | 'connectionState' | 'devicePresence'>;
+export type InkSyncSource = Pick<SyncClient, 'subscribe' | 'onEvent' | 'linkState' | 'devicePresence'>;
 
 export interface InkColumnProps {
   notebookId: string;
@@ -109,7 +109,8 @@ export function InkColumn({ notebookId, client, className }: InkColumnProps) {
   const [following, setFollowing] = useState(true);
   const [presencePage, setPresencePage] = useState<string | null>(null);
   const [ipadConnected, setIpadConnected] = useState<boolean | null>(null);
-  const [syncState, setSyncState] = useState(client.connectionState);
+  // Zustand der eigenen Verbindung: im Folge-Tab die Mitlese-Verbindung (§11.8), über die die Striche ankommen
+  const [syncState, setSyncState] = useState(client.linkState);
   const [loadingPage, setLoadingPage] = useState(false);
   const [pageError, setPageError] = useState<unknown>(null);
   const [liveFailed, setLiveFailed] = useState(false);
@@ -344,7 +345,7 @@ export function InkColumn({ notebookId, client, className }: InkColumnProps) {
     };
 
     const offs = [
-      client.onEvent('connection', (c) => {
+      client.onEvent('link', (c) => {
         setSyncState(c.state);
         // Nach einem Verbindungsfehler (Core war nicht da) neu laden, sobald es wieder geht
         if (c.state === 'online' && needsReload && !recovering) reloadRef.current();
@@ -368,7 +369,7 @@ export function InkColumn({ notebookId, client, className }: InkColumnProps) {
         void establish(true);
       }),
     ];
-    setSyncState(client.connectionState);
+    setSyncState(client.linkState);
     // `presence` kam vielleicht schon vor dem Einhängen: die letzte Meldung des iPads nachlesen
     const known = client.devicePresence('ipad');
     if (known && known.notebook_id === notebookId && known.page_id) {

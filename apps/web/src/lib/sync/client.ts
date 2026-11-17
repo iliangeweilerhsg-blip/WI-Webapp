@@ -1,7 +1,8 @@
 // Gemeinsamer Web-Sync-Client (VERTRAEGE §11, §16.2, Ticket T1-WS).
 //
-// Ein Client, eine Verbindung, eine globale Warteschlange. Unit-Tests laufen gegen einen Fake-Server
-// (apps/web/test/sync-fake-server.ts). Gegen den echten Server (T1-08) per E2E geprüft, siehe PR #66.
+// Ein Client, eine Verbindung, eine globale Warteschlange. Mit mehreren Tabs sendet nur der Leader-Tab; Folge-Tabs halten
+// eine Mitlese-Verbindung (nur Abos und Ereignisse, §11.8), damit ihre Ansichten live bleiben. Unit-Tests laufen gegen
+// einen Fake-Server (apps/web/test/sync-fake-server.ts). Gegen den echten Server (T1-08) per E2E geprüft, siehe PR #66.
 import {
   SyncOpSchema,
   SyncServerMessageSchema,
@@ -256,6 +257,13 @@ export class SyncClient {
 
   private ws: WebSocketLike | null = null;
   private state: ConnectionState = 'idle';
+  /**
+   * Folge-Tab mit Mitlese-Verbindung (§11.8): Die Verbindung abonniert Ströme und empfängt Operationen und Ereignisse,
+   * sendet aber nie die Warteschlange und schreibt nichts in den Speicher. `state` bleibt dabei `other_tab`,
+   * der Zustand der Verbindung selbst steht in `link`.
+   */
+  private follower = false;
+  private link: ConnectionState = 'idle';
   private wanted = false;
   private connId = 0;
   private fatalCode: string | null = null;
@@ -317,7 +325,7 @@ export class SyncClient {
   /**
    * Lädt die Warteschlange und baut die Verbindung auf. Verbindet danach von selbst neu (§11.2, §11.4).
    * Die Zusage löst auf, sobald die Rolle feststeht (Leader oder anderer Tab), nicht erst bei `online`.
-   * Mit mehreren Tabs verbindet nur der Leader-Tab; die anderen synchronisieren nicht (`other_tab`).
+   * Mit mehreren Tabs sendet nur der Leader-Tab; die anderen (`other_tab`) lesen über eine Mitlese-Verbindung mit.
    */
   async connect(): Promise<void> {
     if (this.session) return this.session.decided;
@@ -348,8 +356,9 @@ export class SyncClient {
       onOtherTab: () => {
         // Erst jetzt steht fest, dass das Lock woanders liegt
         if (this.session !== session || this.isLeader) return;
-        this.setState('other_tab');
+        if (!this.follower) this.setState('other_tab');
         resolve();
+        this.startFollowing();
       },
       onLost: () => this.loseLeadership(lock),
       onChanged: () => this.emit('leader.changed', {}),
@@ -379,6 +388,8 @@ export class SyncClient {
       }
       this.afterClose();
     }
+    this.follower = false;
+    this.link = 'idle';
     this.session?.resolve();
     this.session = null;
     if (this.leaderLock) {
@@ -390,9 +401,18 @@ export class SyncClient {
     this.setState('closed');
   }
 
-  /** Zustand der Verbindung. */
+  /** Zustand der Verbindung. In einem Folge-Tab `other_tab`, auch wenn er mitliest (siehe `linkState`). */
   get connectionState(): ConnectionState {
     return this.state;
+  }
+
+  /**
+   * Zustand der eigenen Verbindung dieses Tabs, über die Operationen der Abos ankommen. Im Leader-Tab gleich
+   * `connectionState`, in einem Folge-Tab der Zustand der Mitlese-Verbindung (`syncing`/`online` = live).
+   * Änderungen meldet das Ereignis `link`.
+   */
+  get linkState(): ConnectionState {
+    return this.follower ? this.link : this.state;
   }
 
   /** Anzahl unbestätigter Operationen. */
@@ -641,8 +661,15 @@ export class SyncClient {
     retryInMs: number | null = null,
     closeCode: number | null = null,
   ): void {
-    this.state = state;
-    this.emit('connection', { state, retryInMs, closeCode });
+    const before = this.linkState;
+    if (this.follower) {
+      // Mitlese-Verbindung: Der Tab bleibt nach außen `other_tab` (Aufnahme, Hinweis „anderer Tab“)
+      this.link = state;
+    } else {
+      this.state = state;
+      this.emit('connection', { state, retryInMs, closeCode });
+    }
+    if (this.linkState !== before) this.emit('link', { state: this.linkState });
   }
 
   private openSocket(): void {
@@ -764,6 +791,11 @@ export class SyncClient {
     this.afterClose();
     if (!this.wanted) {
       this.setState('closed', null, code);
+      return;
+    }
+    if (this.follower && (code === 4401 || code === 4426 || this.fatalCode)) {
+      // Mitlesen geht dauerhaft nicht; der Tab kann trotzdem später Leader werden
+      this.setState('failed', null, code);
       return;
     }
     if (code === 4401 || code === 4426 || this.fatalCode) {
@@ -1005,7 +1037,7 @@ export class SyncClient {
   }
 
   private async onWelcome(w: Extract<SyncServerMessage, { type: 'welcome' }>, connId: number): Promise<void> {
-    if (this.state !== 'connecting') return;
+    if (this.linkState !== 'connecting') return;
     this.welcomed = true;
     if (this.welcomeTimer) clearTimeout(this.welcomeTimer);
     this.welcomeTimer = null;
@@ -1018,7 +1050,9 @@ export class SyncClient {
       epochChanged ? 'db_epoch_changed' : 'unknown_position',
       epochChanged,
     );
-    if (stored === null) await this.store.setMeta('db_epoch', w.db_epoch).catch(() => undefined);
+    // Die Epoche schreibt nur der Leader (§11.8): Ein Folge-Tab würde dem Leader sonst einen Epochenwechsel verdecken
+    if (stored === null && this.isLeader)
+      await this.store.setMeta('db_epoch', w.db_epoch).catch(() => undefined);
     if (this.lastPresence) this.sendJson({ type: 'presence', ...this.lastPresence });
     this.startResets(resets, epochChanged ? w.db_epoch : null);
     // Noch nicht gemeldete Abos (spät oder im Fenster neu angemeldet) jetzt nachmelden (Reset-Ströme abonniert resetLoop selbst)
@@ -1068,7 +1102,7 @@ export class SyncClient {
     }
     void (async () => {
       const results = await Promise.all(resets.map(({ sub, info }) => this.requestReset(sub, info)));
-      if (epochToStore && results.every(Boolean)) {
+      if (epochToStore && results.every(Boolean) && this.isLeader) {
         await this.store.setMeta('db_epoch', epochToStore).catch(() => undefined);
       }
     })();
@@ -1121,11 +1155,11 @@ export class SyncClient {
     this.stopClockSync();
     this.clockSamples = [];
     this.clockLost = 0;
-    if (this.state === 'syncing') {
+    if (this.linkState === 'syncing') {
       this.clockTimeout = setTimeout(() => {
         // Server antwortet nicht auf time.ping: Warteschlange trotzdem senden (ohne Versatz bleibt clock_uncertain)
         this.clockTimeout = null;
-        if (connId === this.connId && this.state === 'syncing') this.goOnline();
+        if (connId === this.connId && this.linkState === 'syncing') this.goOnline();
       }, this.clockSyncTimeoutMs);
     }
     this.sendClockPing();
@@ -1186,7 +1220,7 @@ export class SyncClient {
     this.clockTimeout = null;
     // Noch nicht gesendete Operationen mit unsicherer Uhr korrigieren, dann erst die Warteschlange senden
     void this.write(() => this.correctPending()).then(() => {
-      if (connId === this.connId && this.state === 'syncing') this.goOnline();
+      if (connId === this.connId && this.linkState === 'syncing') this.goOnline();
     });
   }
 
@@ -1216,7 +1250,7 @@ export class SyncClient {
 
   /** Sendet unbestätigte Operationen in Originalreihenfolge, höchstens `maxInFlight` ohne Antwort (§11.2). */
   private pump(): void {
-    if (this.state !== 'online' || this.sending || !this.isLeader) return;
+    if (this.linkState !== 'online' || this.sending || !this.isLeader) return;
     this.sending = true;
     const fresh: QueueEntry[] = [];
     try {
@@ -1456,6 +1490,8 @@ export class SyncClient {
       return this.reloadQueue();
     }).catch(() => undefined);
     if (this.leaderLock !== lock || !this.wanted) return; // inzwischen getrennt
+    // Die Mitlese-Verbindung endet; die Leader-Verbindung meldet die Abos mit ihren Positionen im `hello`
+    this.stopFollowing();
     this.isLeader = true;
     this.emit('queue', { pending: this.queue.length });
     if (!this.ws) this.openSocket();
@@ -1524,6 +1560,38 @@ export class SyncClient {
       this.pending.delete(id);
     }
     this.setState('other_tab');
+    this.startFollowing();
+  }
+
+  /**
+   * Folge-Tab: Mitlese-Verbindung aufbauen (§11.8). Sie meldet die Abos dieses Tabs im `hello` und bekommt deren
+   * Operationen sowie die Ereignisse (`presence` …). Gesendet wird darüber nur Steuerung (`hello`, `subscribe`, `ping`,
+   * Uhrabgleich), nie die Warteschlange: `pump` und alle Schreibzugriffe prüfen `isLeader`.
+   */
+  private startFollowing(): void {
+    if (this.follower || this.isLeader || !this.wanted) return;
+    this.follower = true;
+    this.link = 'idle';
+    this.openSocket();
+  }
+
+  /** Mitlese-Verbindung schließen (der Tab wird Leader). */
+  private stopFollowing(): void {
+    if (!this.follower) return;
+    this.connId++;
+    this.clearReconnect();
+    const ws = this.ws;
+    if (ws) {
+      this.detach(ws);
+      try {
+        ws.close(1000, 'leader');
+      } catch {
+        // schon zu
+      }
+      this.afterClose();
+    }
+    this.follower = false;
+    this.link = 'idle';
   }
 
   // ------------------------------------------------------------------ Ereignisse
