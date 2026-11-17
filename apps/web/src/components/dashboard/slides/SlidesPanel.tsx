@@ -39,7 +39,7 @@ export interface SlidesPanelProps {
   onSession?: (session: Session) => void;
 }
 
-/** Abstand der Abfrage nach neuen Folien in einer Session ohne Satz (VERTRAEGE §22.6) */
+/** Abstand der Abfrage von `deck-options` in der Live-Ansicht, mit und ohne Satz (VERTRAEGE §22.6) */
 export const DECK_OFFER_POLL_MS = 60_000;
 
 const NO_SESSION_UPDATE = () => undefined;
@@ -102,13 +102,11 @@ export function SlidesPanel({
   // Fall, dass der Satz von außen gelöscht wird (dann sagt `current_deck_id = null` es, auch ohne Neuladen)
   const options = useDeckOptions(moduleId, sessionId, {
     enabled: active || deckGone,
-    // Bei jedem Sichtbarwerden des Tabs, mit und ohne Satz: eine leichte Abfrage, keine Dauerschleife
+    // Bei jedem Sichtbarwerden des Tabs, mit und ohne Satz
     refetchOnVisible: active,
-    // Alle 60 s nur, solange es Folien anzubieten gibt: ohne Satz oder mit gelöschtem Satz (§22.6)
-    refetchInterval: (data) =>
-      active && (slideDeckId === null || deckGone || data?.current_deck_id === null)
-        ? DECK_OFFER_POLL_MS
-        : false,
+    // Alle 60 s im sichtbaren Tab, auch mit Satz (§22.6): Wird er von außen gelöscht, während der Tab sichtbar bleibt,
+    // merkt die Ansicht es spätestens dann und sendet kein `slide.change` mehr auf den gelöschten Satz.
+    refetchInterval: active ? DECK_OFFER_POLL_MS : false,
   });
   const optionsGone =
     slideDeckId !== null &&

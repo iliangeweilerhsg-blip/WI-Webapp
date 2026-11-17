@@ -191,14 +191,28 @@ export function patchSession(
  * `slide_deck_id` bei `POST /sessions` und `POST /sessions/{id}/start` (22.4): prüft den Satz. Ein leerer Wert lässt den
  * vorhandenen stehen. Gibt den Fehler zurück oder `null`; gesetzt wird mit {@link applyDeck}.
  */
-export function checkDeckField(core: DeckCore, moduleId: string, value: unknown): DeckResult | null {
+export function checkDeckField(
+  core: DeckCore,
+  moduleId: string,
+  value: unknown,
+  session?: Session,
+): DeckResult | null {
   if (value === undefined || value === null || value === '') return null;
+  // Hat die Session schon einen gültigen Satz, ignoriert der Core das Feld: keine Prüfung, kein Fehler (22.4)
+  if (session && hasValidDeck(core, session)) return null;
   if (typeof value !== 'string' || !UUID.test(value)) return fail(400, 'validation_failed');
   return checkNewDeck(core, value, moduleId);
 }
 
+/** Gültiger Satz: Zeiger gesetzt, Satz nicht gelöscht und aus dem Modul der Session (22.4) */
+function hasValidDeck(core: DeckCore, session: Session): boolean {
+  const deck = currentDeck(core, session);
+  return deck !== null && deck.module_id === session.module_id;
+}
+
 export function applyDeck(core: DeckCore, session: Session, value: unknown): void {
   if (typeof value !== 'string' || value === '') return;
+  if (hasValidDeck(core, session)) return;
   session.slide_deck_id = value;
   const deck = core.decks.find((d) => d.id === value);
   if (deck && deck.session_id === null) deck.session_id = session.id;

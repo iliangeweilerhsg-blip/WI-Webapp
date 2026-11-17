@@ -68,7 +68,8 @@ export function useStartDeck(
 
   return {
     // Hat die Session schon einen Satz, bleibt er stehen: kein Feld im Start. Auch nicht mitten in einer Wahl oder in
-    // einem Upload: Ein Start mit Satz überschreibt im Core ohne Prüfung (§22.4).
+    // einem Upload. Der Core ignoriert das Feld bei vorhandenem Satz (§22.4); `choice.busy` und `uploading` sind die
+    // zweite Absicherung, falls die Wahl den Satz erst setzt, während der Start schon unterwegs ist.
     startDeckId: choice.busy || uploading ? undefined : (suggestedId ?? undefined),
     shown,
     ready: options !== undefined,

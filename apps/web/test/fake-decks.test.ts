@@ -247,7 +247,7 @@ describe('Fake-Core: PATCH /sessions/{id} (22.4)', () => {
 
 describe('Fake-Core: slide_deck_id bei Anlegen und Start (22.4) und Upload (22.5)', () => {
   it('POST /sessions und Start prüfen den Satz; ein leerer Wert lässt den vorhandenen stehen', async () => {
-    setup([makeSession({ id: S, state: 'bereit', started_at: null, slide_deck_id: A })]);
+    setup([makeSession({ id: S, state: 'bereit', started_at: null, slide_deck_id: null })]);
     expect(code(await call('POST', `/sessions/${S}/start`, { slide_deck_id: id(0x99) }))).toBe(
       'slide_deck_not_found',
     );
@@ -256,15 +256,38 @@ describe('Fake-Core: slide_deck_id bei Anlegen und Start (22.4) und Upload (22.5
     );
     expect(core.sessions[0]!.state).toBe('bereit');
     await call('POST', `/sessions/${S}/start`, { started_from: 'mac' });
-    expect(core.sessions[0]).toMatchObject({ state: 'laeuft', slide_deck_id: A });
+    expect(core.sessions[0]).toMatchObject({ state: 'laeuft', slide_deck_id: null });
     // Ein Start auf laeuft ändert den Satz nicht
     await call('POST', `/sessions/${S}/start`, { slide_deck_id: B });
-    expect(core.sessions[0]!.slide_deck_id).toBe(A);
+    expect(core.sessions[0]!.slide_deck_id).toBeNull();
     const created = await call('POST', '/sessions', { id: id(0xe9), module_id: MOD.id, slide_deck_id: B });
     expect(created.json).toMatchObject({ slide_deck_id: B });
     expect(
       code(await call('POST', '/sessions', { id: id(0xea), module_id: MOD.id, slide_deck_id: FOREIGN })),
     ).toBe('slide_deck_module_mismatch');
+  });
+
+  it('Start mit Feld bei Session mit gültigem Satz: ignoriert, auch veraltet oder gelöscht (200, Satz bleibt)', async () => {
+    setup([makeSession({ id: S, state: 'bereit', started_at: null, slide_deck_id: A })]);
+    // B gelöscht: ein veralteter Vorschlag lässt den Start nicht scheitern
+    core.decks.find((d) => d.id === B)!.deleted_at = '2026-11-02T08:00:00Z';
+    const res = await call('POST', `/sessions/${S}/start`, { slide_deck_id: B, started_from: 'mac' });
+    expect(res.status).toBe(200);
+    expect(core.sessions[0]).toMatchObject({ state: 'laeuft', slide_deck_id: A });
+  });
+
+  it('Start mit Feld bei Session ohne gültigen Satz (null, gelöscht, anderes Modul): setzt und prüft', async () => {
+    setup([makeSession({ id: S, state: 'bereit', started_at: null, slide_deck_id: A })]);
+    core.decks.find((d) => d.id === A)!.deleted_at = '2026-11-02T08:00:00Z';
+    expect(code(await call('POST', `/sessions/${S}/start`, { slide_deck_id: id(0x99) }))).toBe(
+      'slide_deck_not_found',
+    );
+    expect((await call('POST', `/sessions/${S}/start`, { slide_deck_id: B })).status).toBe(200);
+    expect(core.sessions[0]!.slide_deck_id).toBe(B);
+    // Zeiger auf einen Satz eines anderen Moduls zählt wie „kein Satz“
+    setup([makeSession({ id: S, state: 'bereit', started_at: null, slide_deck_id: FOREIGN })]);
+    expect((await call('POST', `/sessions/${S}/start`, { slide_deck_id: B })).status).toBe(200);
+    expect(core.sessions[0]!.slide_deck_id).toBe(B);
   });
 
   async function upload(sessionId: string, name = 'x.pdf') {

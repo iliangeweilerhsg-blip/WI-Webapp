@@ -341,6 +341,24 @@ describe('Start-Karte: Folien', () => {
     expect(window.sessionStorage.getItem(`sg.folien.ohne.${SESSION_ID}`)).toBe('1');
   });
 
+  it('„Ohne Folien“ gilt sofort in der Anzeige, auch wenn die Neuladung der Optionen noch aussteht', async () => {
+    const user = userEvent.setup();
+    boot({ sessions: [planned({ slide_deck_id: D1 }), VL6] });
+    await row();
+    const coreFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).includes('/deck-options')
+        ? new Promise<Response>(() => undefined)
+        : coreFetch(input, init),
+    );
+    await user.click(screen.getByRole('button', { name: 'Ändern' }));
+    await user.click(within(screen.getByRole('list', { name: 'Foliensätze' })).getByText('Ohne Folien'));
+    await waitFor(() => expect(patch()).toHaveLength(1));
+    await waitFor(() => expect(screen.getByTestId('start-deck')).toHaveTextContent('Ohne Folien'));
+    // Die alte Momentaufnahme nannte D1 noch als aktuellen Satz: Sie darf nicht wieder durchscheinen
+    expect(screen.getByTestId('start-deck')).not.toHaveTextContent('VL 05 Normalformen');
+  });
+
   it('eine ausdrückliche Wahl löscht den Merker „Ohne Folien“', async () => {
     const user = userEvent.setup();
     window.sessionStorage.setItem(`sg.folien.ohne.${SESSION_ID}`, '1');
@@ -441,6 +459,30 @@ describe('Start-Karte: Folien, Start gegen veralteten Stand', () => {
     // Der Start schickt kein Feld: Im Core bleibt die Wahl D1 stehen (ein Start mit Satz überschriebe sie)
     expect(post(/\/start$/)[0]!.body).toEqual({ started_from: 'mac' });
     expect(core.sessions.find((s) => s.id === SESSION_ID)?.slide_deck_id).toBe(D1);
+  });
+
+  it('Start während eines laufenden PATCH schickt kein slide_deck_id mit', async () => {
+    const user = userEvent.setup();
+    boot();
+    await row();
+    // Der PATCH hängt, bis er freigegeben wird
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const coreFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'PATCH') await gate;
+      return coreFetch(input, init);
+    });
+    await user.click(screen.getByRole('button', { name: 'Ändern' }));
+    await user.click(
+      within(screen.getByRole('list', { name: 'Foliensätze' })).getByText('VL 05 Normalformen'),
+    );
+    await user.click(screen.getByRole('button', { name: 'Start' }));
+    await waitFor(() => expect(post(/\/start$/)).toHaveLength(1));
+    // Der Vorschlag D2 ist noch der angezeigte Stand, geht aber nicht mit
+    expect(post(/\/start$/)[0]!.body).toEqual({ started_from: 'mac' });
+    release();
+    await act(async () => undefined);
   });
 
   it('ein Satz, den ein anderer Weg gesetzt hat, wird beim Start nicht mit dem alten Vorschlag überschrieben', async () => {

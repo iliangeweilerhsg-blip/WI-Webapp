@@ -1353,8 +1353,8 @@ export function installFakeCore(
           ) {
             return invalid();
           }
-          // Mit `slide_deck_id` wird der Satz geprüft und gesetzt, ohne Sperrprüfung (§22.4); sonst bleibt der vorhandene
-          const rejectedDeck = checkDeckField(core, target.module_id, body?.slide_deck_id);
+          // Mit `slide_deck_id` wird der Satz nur geprüft und gesetzt, wenn die Session keinen gültigen hat; sonst ignoriert (§22.4)
+          const rejectedDeck = checkDeckField(core, target.module_id, body?.slide_deck_id, target);
           if (rejectedDeck) return json(rejectedDeck.body, rejectedDeck.status);
           // Eine andere aktive Session endet vorher am Kalenderende, spätestens jetzt (§9.1)
           const other = core.sessions.find(

@@ -325,32 +325,32 @@ describe('Live-Ansicht: Abfrage nach neuen Folien', () => {
     state.mockRestore();
   });
 
-  it('hört auf, sobald die Session einen Satz hat', async () => {
-    const { rerender } = open();
-    await screen.findByRole('button', { name: 'Folien wählen' });
-    await waitFor(() => expect(optionCalls()).toHaveLength(1));
-    // Die Session bekommt von außen einen Satz (session.updated): kein Polling mehr
-    core.decks.push(
-      makeDeck({ id: D3, module_id: MODULE.id, title: 'VL 08 Sperren', ingest_state: 'verarbeitet' }),
-    );
-    core.slides[D3] = makeSlides(D3, 3);
-    core.sessions.find((x) => x.id === SESSION_ID)!.slide_deck_id = D3;
-    rerender(
-      <QueryClientProvider client={queryClient}>
-        <SlidesPanel
-          sessionId={SESSION_ID}
-          moduleId={MODULE.id}
-          slideDeckId={D3}
-          active
-          startedAt={Date.parse(STARTED)}
-          client={fakeSync().client}
-        />
-      </QueryClientProvider>,
-    );
+  it('fragt auch mit Satz alle 60 s, der erste Folienwechsel wartet auf keine Abfrage', async () => {
+    core.decks.forEach((d) => (d.deleted_at = null));
+    core.sessions = [session({ slide_deck_id: D1 })];
+    const { sync } = open(session({ slide_deck_id: D1 }));
     await screen.findByTestId('slide-counter');
-    const before = optionCalls().length;
-    await act(async () => void (await vi.advanceTimersByTimeAsync(180_000)));
-    expect(optionCalls().length).toBe(before);
+    await waitFor(() => expect(optionCalls()).toHaveLength(1));
+    // Sofort nach dem Öffnen: Der Wechsel geht ohne neue Abfrage hinaus
+    fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+    await waitFor(() => expect(sync.send).toHaveBeenCalledTimes(1));
+    expect(optionCalls()).toHaveLength(1);
+    await act(async () => void (await vi.advanceTimersByTimeAsync(61_000)));
+    expect(optionCalls()).toHaveLength(2);
+  });
+
+  it('ein von außen gelöschter Satz wird bei sichtbarem Tab nach 60 s erkannt: kein slide.change mehr', async () => {
+    core.decks.forEach((d) => (d.deleted_at = null));
+    core.sessions = [session({ slide_deck_id: D1 })];
+    const { sync } = open(session({ slide_deck_id: D1 }));
+    await screen.findByTestId('slide-counter');
+    await waitFor(() => expect(optionCalls()).toHaveLength(1));
+    core.decks.find((d) => d.id === D1)!.deleted_at = '2026-11-04T08:30:10Z';
+    await act(async () => void (await vi.advanceTimersByTimeAsync(61_000)));
+    expect(await screen.findByText('Die Folien dieser Vorlesung sind gelöscht.')).toBeInTheDocument();
+    fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+    fireEvent.keyDown(document.body, { key: ' ' });
+    expect(sync.send).not.toHaveBeenCalled();
   });
 });
 
