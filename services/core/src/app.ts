@@ -30,6 +30,7 @@ import { registerWeb } from './plugins/web.ts';
 import { localTimeZone } from './learning/day.ts';
 import { createScheduler } from './learning/params.ts';
 import { createMoodleServices, type MoodleServices } from './moodle/index.ts';
+import { LectureSync } from './moodle/lecture.ts';
 import { MoodleSync } from './moodle/sync.ts';
 import { aiStatusRoutes } from './routes/ai-status.ts';
 import { backupRoutes } from './routes/backups.ts';
@@ -77,6 +78,10 @@ export interface BuildAppOptions {
   moodle?: MoodleServices;
   /** Moodle-Abgleich (T1-23). Standard: einer auf `moodle` und der Datenbank */
   moodleSync?: MoodleSync;
+  /** Abgleich zur Vorlesung (§17.8). Standard: einer auf `moodleSync`. Tests setzen eine Attrappe ein */
+  lectureSync?: Pick<LectureSync, 'onTick'>;
+  /** Abstand des Session-Takts in ms. Standard: eine Minute. Nur für Tests, `main.ts` setzt ihn nicht */
+  sessionTickIntervalMs?: number;
   /** Abgleich beim Start und alle 2 h (F-MDL-04). Standard: aus; `main.ts` schaltet ihn ein */
   moodleSchedule?: boolean;
   /** Höchstens so lange wartet das Beenden auf einen laufenden Abgleich. Standard: `SHUTDOWN_WAIT_MS` (7 s) */
@@ -157,6 +162,16 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       dataDir: config.dataDir,
       moodle,
       logger: logger.child({ module: 'moodle-sync' }),
+      ...(options.now ? { now: options.now } : {}),
+    });
+
+  const lectureSync: Pick<LectureSync, 'onTick'> =
+    options.lectureSync ??
+    new LectureSync({
+      db,
+      sync: moodleSync,
+      status: moodle.status,
+      logger: logger.child({ module: 'moodle-lecture' }),
       ...(options.now ? { now: options.now } : {}),
     });
 
@@ -323,6 +338,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         config,
         onError: (error) => logger.error({ err: error }, 'Session-Takt fehlgeschlagen'),
         ...(options.now ? { now: options.now } : {}),
+        ...(options.sessionTickIntervalMs !== undefined ? { intervalMs: options.sessionTickIntervalMs } : {}),
+        afterTick: (result, o) => lectureSync.onTick(result, { startup: o.startup === true }),
       });
     });
     app.addHook('onClose', async () => {
