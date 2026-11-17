@@ -6,6 +6,7 @@
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect } from 'react';
 import type { MarkerKind, SessionSnapshot, SyncOp } from '@sg/shared';
+import { nextRetryDelay, RETRY_START_MS } from '../../../lib/retry.ts';
 import { fetchSessionSnapshot, sessionStreamId } from '../../../lib/session-stream.ts';
 import type { SyncClient } from '../../../lib/sync/client.ts';
 
@@ -105,6 +106,8 @@ function followMarkers(queryClient: QueryClient, sessionId: string, client: Sync
   let unsubscribe: (() => void) | null = null;
   let running = false;
   let needsReload = false;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let retryDelay = RETRY_START_MS;
   const update = (fn: (state: MarkerState) => MarkerState) =>
     queryClient.setQueryData<MarkerState>(key, (old) => fn(old ?? EMPTY_MARKERS));
 
@@ -122,8 +125,14 @@ function followMarkers(queryClient: QueryClient, sessionId: string, client: Sync
     }
   };
 
+  const clearRetry = () => {
+    if (retryTimer !== null) clearTimeout(retryTimer);
+    retryTimer = null;
+  };
+
   const establish = async () => {
     if (running || cancelled) return;
+    clearRetry();
     running = true;
     try {
       const from = await load();
@@ -142,8 +151,14 @@ function followMarkers(queryClient: QueryClient, sessionId: string, client: Sync
           },
         }) ?? null;
       needsReload = false;
+      retryDelay = RETRY_START_MS;
     } catch {
       needsReload = true;
+      // Ist `link` schon `online`, kommt kein Ereignis mehr: selbst mit wachsender Wartezeit wiederholen
+      if (!cancelled) {
+        retryTimer = setTimeout(() => void establish(), retryDelay);
+        retryDelay = nextRetryDelay(retryDelay);
+      }
     } finally {
       running = false;
     }
@@ -152,12 +167,13 @@ function followMarkers(queryClient: QueryClient, sessionId: string, client: Sync
   void establish();
   // `link` (nicht `connection`): Im Folge-Tab bleibt `connection` bei `other_tab`, `link` zeigt die Mitlese-Verbindung
   // (VERTRAEGE §11.8). Im Leader-Tab sind beide gleich.
-  const offConnection = client.onEvent('link', (c) => {
+  const offLink = client.onEvent('link', (c) => {
     if (c.state === 'online' && needsReload) void establish();
   });
   return () => {
     cancelled = true;
-    offConnection();
+    clearRetry();
+    offLink();
     unsubscribe?.();
     unsubscribe = null;
   };

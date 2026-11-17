@@ -305,8 +305,8 @@ export function useActiveSession() {
       // fragt niemand nach, der falsche Stand bliebe stehen: darum neu abrufen (bricht den laufenden Abruf ab).
       if (client.isFetching({ queryKey: ACTIVE_SESSION_KEY, exact: true }) > 0) refetch();
     });
-    let wasDown = sync.connectionState !== 'online';
-    const offConnection = sync.onEvent('connection', (c) => {
+    let wasDown = sync.linkState !== 'online';
+    const offLink = sync.onEvent('link', (c) => {
       if (c.state === 'online') {
         if (wasDown) refetch();
         wasDown = false;
@@ -317,7 +317,7 @@ export function useActiveSession() {
     const offLeader = sync.onEvent('leader.changed', refetch);
     return () => {
       offUpdated();
-      offConnection();
+      offLink();
       offLeader();
     };
   }, [sync, client]);

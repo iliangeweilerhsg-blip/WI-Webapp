@@ -1,7 +1,7 @@
 // Folge-Tab (VERTRAEGE §11.8): `connection` bleibt dort `other_tab`, die Mitlese-Verbindung meldet sich über `link`.
 // Scheitert das erste Laden (Core lief beim Öffnen noch nicht), müssen Marker und Folienposition neu laden, sobald
 // `link` `online` wird (Issue #381).
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -113,5 +113,65 @@ describe('Folge-Tab: Neuladen über link', () => {
     await waitFor(() => expect(sync.subscribe).toHaveBeenCalledTimes(1));
     expect(snapshotCalls()).toBe(1);
     expect(result.current.position).toEqual({ index: 6, tMs: 5000 });
+  });
+});
+
+/** Leader-Tab (oder Folge-Tab mit stehender Mitlese-Verbindung): `link` ist schon `online`, es kommt kein Ereignis mehr */
+function onlineClient() {
+  const subscribe = vi.fn(() => () => undefined);
+  const raw = {
+    connectionState: 'online',
+    linkState: 'online',
+    subscribe,
+    onEvent: vi.fn(() => () => undefined),
+  };
+  return { client: raw as unknown as SyncClient, subscribe };
+}
+
+describe('Erstes Laden scheitert, obwohl link schon online ist', () => {
+  afterEach(() => vi.useRealTimers());
+  const advance = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+
+  it('Marker: wiederholt mit wachsender Wartezeit, danach steht das Abo', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const sync = onlineClient();
+    renderHook(() => useMarkers(SESSION_ID, sync.client), { wrapper });
+    await advance(0); // 1. Versuch scheitert
+    await advance(1_000); // 2. Versuch scheitert
+    expect(sync.subscribe).not.toHaveBeenCalled();
+    core.down = false;
+    await advance(1_500); // nächster Versuch erst nach 2 s: noch nichts
+    expect(sync.subscribe).not.toHaveBeenCalled();
+    await advance(500);
+    expect(sync.subscribe).toHaveBeenCalledTimes(1);
+    await advance(60_000); // danach keine weiteren Versuche
+    expect(sync.subscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('Folienposition: wiederholt mit wachsender Wartezeit, danach steht das Abo', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const sync = onlineClient();
+    renderHook(() => useSlidePosition(SESSION_ID, sync.client), { wrapper });
+    await advance(0);
+    await advance(1_000);
+    expect(sync.subscribe).not.toHaveBeenCalled();
+    core.down = false;
+    await advance(1_500);
+    expect(sync.subscribe).not.toHaveBeenCalled();
+    await advance(500);
+    expect(sync.subscribe).toHaveBeenCalledTimes(1);
+    await advance(60_000);
+    expect(sync.subscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('Aushängen beendet die Wiederholung', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const sync = onlineClient();
+    const { unmount } = renderHook(() => useMarkers(SESSION_ID, sync.client), { wrapper });
+    await advance(0);
+    unmount();
+    core.down = false;
+    await advance(60_000);
+    expect(sync.subscribe).not.toHaveBeenCalled();
   });
 });

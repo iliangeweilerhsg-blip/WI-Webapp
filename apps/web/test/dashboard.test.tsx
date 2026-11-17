@@ -86,6 +86,7 @@ function fakeSync(state = 'online') {
   let ipad: unknown = null;
   const client = {
     connectionState: state,
+    linkState: state,
     connect: vi.fn(async () => undefined),
     disconnect: vi.fn(),
     onEvent: vi.fn((name: string, fn: (data: unknown) => void) => {
@@ -119,8 +120,10 @@ function fakeSync(state = 'online') {
     },
     setState(next: string) {
       client.connectionState = next;
+      client.linkState = next;
       for (const fn of listeners.get('connection') ?? [])
         fn({ state: next, retryInMs: null, closeCode: null });
+      for (const fn of listeners.get('link') ?? []) fn({ state: next });
     },
   };
 }

@@ -36,6 +36,7 @@ function fakeSync() {
   const send = vi.fn(async () => ({ type: 'ack', op_id: 'x', seq: 1 }));
   const raw = {
     connectionState: 'online',
+    linkState: 'online',
     clockOffsetMs: null as number | null,
     send,
     onEvent: vi.fn((name: string, fn: (data: unknown) => void) => {
@@ -301,9 +302,9 @@ describe('Live-Ansicht: Abfrage nach neuen Folien', () => {
     await waitFor(() => expect(optionCalls()).toHaveLength(1));
     addMoodleDeck();
     // Ein Abbruch allein fragt nicht, erst das Neuverbinden
-    await sync.emit('connection', { state: 'backoff', retryInMs: 1000, closeCode: null });
+    await sync.emit('link', { state: 'backoff' });
     expect(optionCalls()).toHaveLength(1);
-    await sync.emit('connection', { state: 'online', retryInMs: null, closeCode: null });
+    await sync.emit('link', { state: 'online' });
     expect(await screen.findByTestId('deck-offer')).toHaveTextContent('VL 08 Sperren');
     expect(optionCalls()).toHaveLength(2);
   });
