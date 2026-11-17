@@ -162,6 +162,8 @@ Optionaler Glättung wird beim Rendern angewendet, nie beim Speichern. Ein durch
 - Pro Punkt 2 Werte als `Float32` little-endian: `width`, `height` (pt, vor `transform`). Das ist die Größe des Punkts aus `PKStrokePoint.size`. Der i-te Eintrag gehört zum i-ten Punkt in `points`, die Anzahl ist gleich.
 - 8 Byte je Punkt: Base64 mit Padding, wo nötig.
 - `points` und `sizes` zusammen höchstens 750 000 Byte. Das sind 31 250 Punkte ohne und 23 437 Punkte mit `sizes`.
+- Das iPad sendet enger: `sizes` nur bis 20 000 Punkte und nur, wenn die kodierte Nachricht mit Reserve unter seiner Sendegrenze bleibt. Sonst lässt es `sizes` weg (VERTRAEGE §23.3).
+- Werte in `sizes` sind endlich und ≥ 0, mindestens einer ist > 0.
 - `width` bleibt der Median von `max(width, height)` der Punkte. `points` ändert sich durch v2 nicht.
 - Das iPad sendet `sizes` nur, wenn der Core im `welcome` die Fähigkeit `stroke_sizes` meldet.
 
