@@ -705,7 +705,10 @@ export async function acceptMerge(tx: Tx, item: ItemRow, targetId: string): Prom
   };
 }
 
-/** A2 zurücknehmen. Wirft `inbox_reopen_conflict`, wenn eine umgehängte Beziehung inzwischen bestätigt ist */
+/**
+ * A2 zurücknehmen. Wirft `inbox_reopen_conflict` (`details.reason = "relation"`, `details.item_id`), wenn der Eintrag
+ * einer umgehängten Beziehung inzwischen `angenommen`/`automatisch` oder ihre Beziehung bestätigt ist (§20.6, T2-22c)
+ */
 export async function undoMerge(tx: Tx, item: ItemRow, decision: InboxDecision): Promise<void> {
   const pId = decision.concept_id ?? item.conceptId!;
   const targetId = decision.merged_into;
@@ -742,10 +745,20 @@ export async function undoMerge(tx: Tx, item: ItemRow, decision: InboxDecision):
       reopened.push(row);
       continue;
     }
+    // Die Einträge kommen nach ID aufsteigend, der erste Treffer bestimmt die Antwort. Weich gelöschte fehlen hier
+    const relationConflict = { reason: 'relation', item_id: row.id };
+    if (row.status === 'angenommen' || row.status === 'automatisch') {
+      throw reopenConflict(
+        'Der Eintrag einer umgehängten Beziehung ist inzwischen angenommen.',
+        relationConflict,
+      );
+    }
     if (!row.relationId) continue;
     const [relation] = await tx.select().from(conceptRelation).where(eq(conceptRelation.id, row.relationId));
     if (!relation) continue;
-    if (relation.confirmed) throw reopenConflict('Eine umgehängte Beziehung ist inzwischen bestätigt.');
+    if (relation.confirmed) {
+      throw reopenConflict('Eine umgehängte Beziehung ist inzwischen bestätigt.', relationConflict);
+    }
     if (relation.fromId === targetId || relation.toId === targetId) movedBack.push({ row, relation });
   }
 
