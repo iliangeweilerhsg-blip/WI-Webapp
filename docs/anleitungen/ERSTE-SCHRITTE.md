@@ -61,4 +61,4 @@ Der Dialog endet bei den Modulen. Alles Weitere stellst du selbst ein.
 | Suche | ⌘K | [SUCHE.md](SUCHE.md) |
 | Lernen | **Inbox** (Kartenvorschläge), **Lernen** (täglich wiederholen) | [LERNEN.md](LERNEN.md), Stichprobe in [KARTEN-PRUEFEN.md](KARTEN-PRUEFEN.md) |
 
-Für den ersten Vorlesungstag lies [VORLESUNGSTAG.md](VORLESUNGSTAG.md). Für spätere Updates [UPDATE.md](UPDATE.md).
+Für den ersten Vorlesungstag lies [VORLESUNGSTAG.md](VORLESUNGSTAG.md). Die Folien prüfst du mit [PRUEFLISTE-FOLIEN.md](PRUEFLISTE-FOLIEN.md). Für spätere Updates [UPDATE.md](UPDATE.md).
