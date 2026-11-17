@@ -16,9 +16,9 @@ Eine Vorlesung soll ohne Zutun mit den richtigen Folien laufen. Heute läuft jed
 
 | Stelle | Stand |
 |---|---|
-| `services/core/src/services/sessions.ts` | `createSession`, `transitionSession` (Start) und `updateSession` (`PATCH`) nehmen `slide_deck_id` an. `PATCH` prüft weder Zustand noch Folienwechsel und sperrt nichts. `linkDeckToSession` setzt `slide_deck.session_id` nur, wenn es leer ist, und räumt es nie auf |
+| `services/core/src/services/sessions.ts` | `createSession`, `transitionSession` (Start) und `updateSession` (`PATCH`) nehmen `slide_deck_id` an. `PATCH` prüfte weder Zustand noch Folienwechsel und sperrte nichts (mit F1 geändert). `linkDeckToSession` setzt `slide_deck.session_id` nur, wenn es leer ist, und räumt es nie auf |
 | `services/core/src/services/material.ts` | `createSlideDeck` mit `sessionId` ruft `attachDeckToSession` (setzt nur, wenn die Session keinen Satz hat). Sperrt den Satz vor der Session |
-| `services/core/src/moodle/sync.ts` | `createSlideDeck` ohne Session. Kein Abgleich zum Vorlesungsbeginn (nur Core-Start, alle 2 h, Knopf) |
+| `services/core/src/moodle/sync.ts` | `createSlideDeck` ohne Session. Kein Abgleich zum Vorlesungsbeginn (heutige Anlässe: Core-Start, alle 2 h, Knopf, nach Zuordnung und nach Inbox-Entscheidung, §17.4) |
 | `apps/web/src/lib/sessions.ts`, `today/StartCard.tsx` | Start über `POST /sessions/{id}/start` nur mit `started_from`. Spontan: `POST /sessions` nur mit `module_id`, dann Start. Kein Aufruf setzt einen Satz |
 | `apps/web/.../slides/SlidesPanel.tsx` | Ohne Satz nur der Hinweis „Folien kommen später – einfach mitschreiben“. `slide.change` nur mit geladenem Satz |
 | `apps/ipad/Sources/Sync/SessionFollower.swift` | Übernimmt `slide_deck_id` aus jedem `session.updated` der verfolgten Session. Sendet kein `slide.change` |
@@ -28,13 +28,13 @@ Eine Vorlesung soll ohne Zutun mit den richtigen Folien laufen. Heute läuft jed
 ## 4. Festlegungen (Kurzfassung, verbindlich ist §22)
 
 - **Maßgeblich** ist nur `session.slide_deck_id`. `slide_deck.session_id` bleibt ein Hinweis.
-- **Frei** = wählbar (nicht gelöscht, `ingest_state ≠ fehler`) und von keiner anderen nicht gelöschten Session außer `verpasst` getragen.
+- **Frei** = wählbar (nicht gelöscht, `ingest_state ≠ fehler`) und von keiner anderen nicht gelöschten Session außer `verpasst` getragen. Der aktuelle Satz der Session steht immer in der Liste, auch bei `fehler`. `used_by` ist ein eigener kleiner Typ `DeckUse`.
 - **Vorschlag** = neuester freier Satz nach `available_at` (Moodle-`timemodified`, sonst `uploaded_at`).
 - **Abruf:** `GET /modules/{id}/deck-options?session_id` → `DeckOptions` (ein Endpunkt für Start-Karte, spontanen Start und Live-Ansicht).
-- **Setzen, wechseln, leeren:** `PATCH /sessions/{id}` in `geplant`, `bereit`, `laeuft`, `pausiert`. Wechseln und Leeren nur vor dem ersten Folienwechsel, sonst `409 slide_deck_locked`. Abgeschlossen: `409 slide_deck_session_closed`.
+- **Setzen, wechseln, leeren:** `PATCH /sessions/{id}` in `geplant`, `bereit`, `laeuft`, `pausiert`. Wechseln und Leeren nur vor dem ersten Folienwechsel, sonst `409 slide_deck_locked` (maßgeblich ist der Zeiger, auch bei gelöschtem Satz). `title` und `slide_deck_id` in einem Aufruf: alles oder nichts. Abgeschlossen: `409 slide_deck_session_closed`.
 - **Start:** Der Core wählt nie selbst. Die Web-App schickt den Vorschlag als `slide_deck_id` mit und startet im Zweifel ohne Satz.
-- **Upload:** `POST /slide-decks` mit `session_id` setzt nur, ersetzt nie.
-- **Moodle:** Der Abgleich verknüpft nichts. Die Live-Ansicht fragt `deck-options` ab (kein neues Ereignis). Neu: Abgleich 15 min vor Beginn, beim Start und alle 10 min in einer laufenden Session ohne Folien.
+- **Upload:** `POST /slide-decks` mit `session_id` setzt nur, ersetzt nie (ein Zeiger auf einen gelöschten Satz ohne `slide_event` zählt als „kein Satz“).
+- **Moodle:** Der Abgleich verknüpft nichts. Die Live-Ansicht fragt `deck-options` ab (kein neues Ereignis). Neu: Abgleich 15 min vor Beginn, beim Start (auch Geräte-Start) und alle 10 min in einer laufenden Session ohne Folien. Anstoß 1 und 2 nur ohne (nicht gelöschten) Satz, Drossel 10 min je Modul im Speicher.
 - **iPad, Worker:** keine Änderung.
 
 ## 5. Tickets
@@ -81,4 +81,4 @@ Eine beendete Session bekommt einen Foliensatz, oder ein falscher Satz wird nach
 7. **Upload mit `session_id` einer abgeschlossenen Session** antwortet neu mit 409 statt den Satz still anzuhängen. Kein Client nutzt das heute. Der spätere Import (F-SES-06) braucht dann einen eigenen Weg.
 8. **iPad nicht am Gerät geprüft.** Die Aussage „keine Änderung“ stützt sich auf den Code (`SessionFollower.apply(sessionUpdate:)`, `InkLibraryService.follow`). Offen ist, ob eine offene Seite „Auf Folie“ sauber zurückfällt, wenn der Satz geleert wird. Vor dem ersten Folienwechsel kann sie nicht aktiv sein, darum sollte nichts passieren.
 9. **Gelöschter Satz an laufender Session:** `DELETE /slide-decks/{id}` lässt `session.slide_deck_id` stehen. §22 behandelt das wie „kein Satz“, löst aber kein `session.updated` aus. Die Live-Ansicht zeigt dann „Folien sind gerade nicht erreichbar.“ Nicht Teil dieses Schnitts.
-10. **`SessionRef` in `DeckOption.used_by`** stammt aus `concepts.schema.json`. F1 prüft, ob der Verweis über Schema-Dateien hinweg mit dem Generator geht, sonst bekommt `DeckOption` einen kleinen eigenen Typ `DeckUse` (`session_id`, `number`, `title`, `started_at`).
+10. **`SessionRef` in `DeckOption.used_by`:** erledigt. Der Verweis über Schema-Dateien hinweg geht mit dem Generator (gemeinsamer Namensraum). Entschieden ist trotzdem ein eigener kleiner Typ `DeckUse` (`session_id`, `number`, `title`), weil die Anzeige weder Modul noch Startzeit braucht.

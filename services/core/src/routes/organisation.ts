@@ -4,6 +4,7 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import {
   ApiErrorSchema,
+  DeckOptionsSchema,
   ModuleCreateSchema,
   ModuleListSchema,
   ModuleSchema,
@@ -15,6 +16,7 @@ import {
   UuidSchema,
 } from '@sg/shared';
 import type { Db } from '../db/client.ts';
+import { getDeckOptions } from '../services/deck-options.ts';
 import { PageQuerySchema } from '../lib/pagination.ts';
 import {
   createModule,
@@ -34,6 +36,11 @@ export interface OrganisationRouteDeps {
 }
 
 const IdParams = z.object({ id: UuidSchema });
+
+/** Leerer Query-Wert gilt als nicht gesetzt, eine ungültige UUID als 400 `validation_failed` */
+const emptyToUndefined = (value: unknown) =>
+  typeof value === 'string' && value.trim() === '' ? undefined : value;
+const DeckOptionsQuery = z.object({ session_id: z.preprocess(emptyToUndefined, UuidSchema.optional()) });
 
 const SemestersQuery = PageQuerySchema.extend({
   archived: z.enum(['true', 'false']).optional(),
@@ -178,6 +185,21 @@ export async function organisationRoutes(app: FastifyInstance, deps: Organisatio
       },
     },
     async (request) => getModule(db, request.params.id),
+  );
+
+  typed.get(
+    '/modules/:id/deck-options',
+    {
+      schema: {
+        tags: ['Organisation'],
+        summary:
+          'Wählbare Foliensätze des Moduls mit Vorschlag und Sperre für eine Session (VERTRAEGE §22.3, nur lesend)',
+        params: IdParams,
+        querystring: DeckOptionsQuery,
+        response: { 200: DeckOptionsSchema, 400: ApiErrorSchema, 404: ApiErrorSchema },
+      },
+    },
+    async (request) => getDeckOptions(db, request.params.id, request.query.session_id),
   );
 
   typed.patch(

@@ -78,6 +78,17 @@ const MINUTE_MS = 60_000;
 const READY_BEFORE_START_MS = 15 * MINUTE_MS;
 
 const NEVER_STARTED_STATES = ['geplant', 'bereit', 'verpasst'] as const;
+/** Abgeschlossene Sessions: Foliensatz setzen, wechseln, leeren und Upload in die Session gehen nicht mehr (§22.4) */
+export const CLOSED_SESSION_STATES = ['beendet', 'verarbeitet', 'verpasst'] as const;
+/** Zustände, in denen eine Session ihren Foliensatz „belegt“ (§22.2). `verpasst` belegt nicht */
+export const OCCUPYING_SESSION_STATES = [
+  'geplant',
+  'bereit',
+  'laeuft',
+  'pausiert',
+  'beendet',
+  'verarbeitet',
+] as const;
 const ACTIVE_STATES = ['laeuft', 'pausiert'] as const;
 
 /** Steht eine nicht gelöschte Session in `laeuft` oder `pausiert`? (UX-04/05: Mac wach halten, schwere Arbeit halten) */
@@ -334,18 +345,87 @@ async function linkDeckToSession(tx: Tx, deckId: string, sessionId: string): Pro
     .where(and(eq(slideDeck.id, deckId), isNull(slideDeck.sessionId), notDeleted(slideDeck)));
 }
 
+/** `sync_stream` von `session:<id>` anlegen (falls sie fehlt) und mit `FOR UPDATE` sperren, wie `appendOp` (§16.2) */
+async function lockSessionStream(tx: Tx, sessionId: string): Promise<void> {
+  const stream = `session:${sessionId}`;
+  await tx.insert(syncStream).values({ stream, headSeq: 0 }).onConflictDoNothing();
+  await tx
+    .select({ headSeq: syncStream.headSeq })
+    .from(syncStream)
+    .where(eq(syncStream.stream, stream))
+    .for('update');
+}
+
+/** Anzahl nicht gelöschter `slide_event` der Session */
+async function countSlideEvents(tx: DbOrTx, sessionId: string): Promise<number> {
+  const [row] = await tx
+    .select({ n: sql<number>`count(*)::int` })
+    .from(slideEvent)
+    .where(and(eq(slideEvent.sessionId, sessionId), notDeleted(slideEvent)));
+  return row?.n ?? 0;
+}
+
 /**
- * Folien-Upload mit `session_id` (VERTRAEGE §9.2): Hat die Session noch keinen Foliensatz, wird er gesetzt.
- * `slide_deck.session_id` setzt der Upload selbst bzw. dieser Aufruf, falls der Satz noch an keiner Session hängt.
+ * Vor dem Einhängen eines hochgeladenen Foliensatzes in eine Session (VERTRAEGE §22.5), als Erstes in der Transaktion
+ * des Uploads: `lockSessionTransitions` → Session-Zeile `FOR NO KEY UPDATE` (gleiche Reihenfolge wie `PATCH`, kein `40P01`).
+ * 404/400 für unbekannte Session bzw. anderes Modul, 409 `slide_deck_session_closed` für abgeschlossene Sessions.
+ */
+export async function lockSessionForDeckUpload(tx: Tx, sessionId: string, moduleId: string): Promise<void> {
+  await lockSessionTransitions(tx);
+  const loaded = await loadSession(tx, sessionId, true);
+  if (!loaded || loaded.row.deletedAt) throw notFound();
+  if (loaded.row.moduleId !== moduleId) {
+    throw new HttpError(400, 'session_module_mismatch', 'Die Session gehört zu einem anderen Modul.');
+  }
+  if ((CLOSED_SESSION_STATES as readonly string[]).includes(loaded.row.state))
+    throw deckSessionClosed(loaded.row.state);
+}
+
+const deckSessionClosed = (state: string) =>
+  new HttpError(
+    409,
+    'slide_deck_session_closed',
+    'Die Session ist abgeschlossen. Der Foliensatz lässt sich nicht mehr ändern.',
+    { state },
+  );
+
+/**
+ * Folien-Upload mit `session_id` (VERTRAEGE §22.5), nach `lockSessionForDeckUpload`: Die Session bekommt den Satz nur,
+ * wenn sie keinen hat, oder wenn ihr Zeiger auf einen gelöschten Satz zeigt und noch kein `slide_event` existiert.
+ * Sonst wird nichts ersetzt. `slide_deck.session_id` ist nur ein Hinweis und wird nur gesetzt, wenn er leer ist.
+ * Bei gelöschtem Satz sperrt sie vor dem Zählen `sync_stream` (Reihenfolge Session → Strom → Satz wie `PATCH`).
  */
 export async function attachDeckToSession(tx: Tx, sessionId: string, deckId: string): Promise<void> {
+  const loaded = await loadSession(tx, sessionId);
+  if (!loaded || loaded.row.deletedAt) return;
+  const pointer = loaded.row.slideDeckId;
+  let attach = pointer === null;
+  if (pointer !== null && pointer !== deckId) {
+    const [old] = await tx
+      .select({ deletedAt: slideDeck.deletedAt })
+      .from(slideDeck)
+      .where(eq(slideDeck.id, pointer));
+    if (old?.deletedAt) {
+      await lockSessionStream(tx, sessionId);
+      attach = (await countSlideEvents(tx, sessionId)) === 0;
+    }
+  }
   await linkDeckToSession(tx, deckId, sessionId);
-  const changed = await tx
+  if (!attach) return;
+  await tx
     .update(session)
     .set({ slideDeckId: deckId, updatedAt: bumpedAt() })
-    .where(and(eq(session.id, sessionId), isNull(session.slideDeckId), notDeleted(session)))
-    .returning({ id: session.id });
-  if (changed.length > 0) await emitUpdated(tx, sessionId);
+    .where(eq(session.id, sessionId));
+  if (pointer) await unlinkDeckFromSession(tx, pointer, sessionId);
+  await emitUpdated(tx, sessionId);
+}
+
+/** `slide_deck.session_id` des alten Satzes auf `NULL`, falls er auf diese Session zeigte (§22.1) */
+async function unlinkDeckFromSession(tx: Tx, deckId: string, sessionId: string): Promise<void> {
+  await tx
+    .update(slideDeck)
+    .set({ sessionId: null, updatedAt: sql`now()` })
+    .where(and(eq(slideDeck.id, deckId), eq(slideDeck.sessionId, sessionId)));
 }
 
 /** Wie `requireDeck`, aber ohne Fehler: unbekannte oder fremde Sätze aus dem Sync werden verworfen */
@@ -1064,28 +1144,85 @@ export async function createSession(tx: Tx, input: SessionCreateInput): Promise<
   return toApiSession((await loadSession(tx, id)) as Loaded);
 }
 
-/** `PATCH /sessions/{id}`: Titel und Foliensatz */
+/**
+ * `PATCH /sessions/{id}`: Titel und Foliensatz (VERTRAEGE §22.4). Alles oder nichts in einer Transaktion,
+ * `session.updated` nur, wenn sich etwas geändert hat.
+ *
+ * Nur `title`: keine der Sperren, in jedem Zustand. Mit `slide_deck_id`: Sperrreihenfolge (§16.2)
+ * `lockSessionTransitions` → Session-Zeile `FOR NO KEY UPDATE` → `sync_stream` von `session:<id>` (hält ein gleichzeitiges
+ * `slide.change` zurück) → `slide_event` zählen → `slide_deck`-Zeilen (alter und neuer Satz, nach `id` aufsteigend).
+ */
 export async function updateSession(
   tx: Tx,
   id: string,
   patch: { title?: string | null | undefined; slide_deck_id?: string | null | undefined },
 ): Promise<Session> {
-  const loaded = await requireSession(tx, id);
+  const withDeck = patch.slide_deck_id !== undefined;
+  let loaded: Loaded;
+  if (withDeck) {
+    await lockSessionTransitions(tx);
+    const found = await loadSession(tx, id, true);
+    if (!found || found.row.deletedAt) throw notFound();
+    loaded = found;
+  } else {
+    loaded = await requireSession(tx, id);
+  }
+  const row = loaded.row;
   const set: Partial<typeof session.$inferInsert> = {};
-  if (patch.title !== undefined) set.title = patch.title;
-  if (patch.slide_deck_id !== undefined) {
-    if (patch.slide_deck_id) await requireDeck(tx, patch.slide_deck_id, loaded.row.moduleId);
-    set.slideDeckId = patch.slide_deck_id;
+  if (patch.title !== undefined && patch.title !== row.title) set.title = patch.title;
+
+  const current = row.slideDeckId;
+  const next = patch.slide_deck_id;
+  if (next !== undefined && next !== current) {
+    if ((CLOSED_SESSION_STATES as readonly string[]).includes(row.state)) throw deckSessionClosed(row.state);
+    await lockSessionStream(tx, id);
+    // Maßgeblich ist der Zeiger (auch bei gelöschtem Satz): Gibt es Folienwechsel, bleibt der Satz (§22.4)
+    const events = current ? await countSlideEvents(tx, id) : 0;
+    const ids = [current, next].filter((x): x is string => typeof x === 'string').sort();
+    const decks = ids.length
+      ? await tx
+          .select({ id: slideDeck.id, moduleId: slideDeck.moduleId, deletedAt: slideDeck.deletedAt })
+          .from(slideDeck)
+          .where(inArray(slideDeck.id, ids))
+          .orderBy(asc(slideDeck.id))
+          .for('no key update')
+      : [];
+    if (current && events > 0) {
+      throw new HttpError(
+        409,
+        'slide_deck_locked',
+        'Der Foliensatz bleibt, weil in dieser Vorlesung schon geblättert wurde.',
+        { slide_deck_id: current, slide_events: events },
+      );
+    }
+    if (next) {
+      const deck = decks.find((d) => d.id === next);
+      if (!deck || deck.deletedAt) {
+        throw new HttpError(404, 'slide_deck_not_found', 'Der Foliensatz wurde nicht gefunden.');
+      }
+      if (deck.moduleId !== row.moduleId) {
+        throw new HttpError(
+          400,
+          'slide_deck_module_mismatch',
+          'Der Foliensatz gehört zu einem anderen Modul.',
+        );
+      }
+    }
+    set.slideDeckId = next;
   }
   if (Object.keys(set).length > 0) {
     await tx
       .update(session)
       .set({ ...set, updatedAt: bumpedAt() })
       .where(eq(session.id, id));
-    if (set.slideDeckId) await linkDeckToSession(tx, set.slideDeckId, id);
+    if (set.slideDeckId !== undefined) {
+      if (current) await unlinkDeckFromSession(tx, current, id);
+      if (set.slideDeckId) await linkDeckToSession(tx, set.slideDeckId, id);
+    }
     await emitUpdated(tx, id);
+    return toApiSession((await loadSession(tx, id)) as Loaded);
   }
-  return toApiSession((await loadSession(tx, id)) as Loaded);
+  return toApiSession(loaded);
 }
 
 /**

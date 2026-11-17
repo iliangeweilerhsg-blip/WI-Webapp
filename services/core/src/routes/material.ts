@@ -477,12 +477,13 @@ export async function materialRoutes(app: FastifyInstance, deps: MaterialRouteDe
         tags: ['Material'],
         summary: 'Foliensatz hochladen',
         description:
-          'multipart/form-data. Felder: `file` (PDF, Pflicht), `module_id` (UUID, Pflicht), `session_id` (UUID), `title`. Gleiche Datei im selben Modul: 200 mit duplicate=true. Ein gescheiterter Foliensatz wird dabei neu eingelesen.',
+          'multipart/form-data. Felder: `file` (PDF, Pflicht), `module_id` (UUID, Pflicht), `session_id` (UUID: hängt den Satz an die Session, wenn sie keinen hat; abgeschlossene Session: 409 `slide_deck_session_closed`), `title`. Gleiche Datei im selben Modul: 200 mit duplicate=true. Ein gescheiterter Foliensatz wird dabei neu eingelesen.',
         consumes: ['multipart/form-data'],
         response: {
           200: UploadResultSchema,
           201: UploadResultSchema,
           ...errorResponses,
+          409: ApiErrorSchema,
           413: ApiErrorSchema,
           415: ApiErrorSchema,
         },

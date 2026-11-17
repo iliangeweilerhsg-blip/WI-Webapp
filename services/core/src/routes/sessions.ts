@@ -143,7 +143,7 @@ export async function sessionRoutes(app: FastifyInstance, deps: SessionRouteDeps
         summary: 'Titel und Foliensatz ändern',
         params: IdParams,
         body: SessionUpdateSchema,
-        response: { 200: SessionSchema, 400: ApiErrorSchema, 404: ApiErrorSchema },
+        response: { 200: SessionSchema, 400: ApiErrorSchema, 404: ApiErrorSchema, 409: ApiErrorSchema },
       },
     },
     async (request) => db.transaction((tx) => updateSession(tx, request.params.id, request.body)),
