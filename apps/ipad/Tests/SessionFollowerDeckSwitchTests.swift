@@ -123,7 +123,9 @@ final class SessionFollowerDeckSwitchTests: XCTestCase {
         XCTAssertEqual(rig.follower.currentSlide, slide)
 
         rig.feed.deliver(.sessionUpdated(brief(deck: "deck-b", updated: 2000)))
-        // Die Position kommt allein aus `slide_events`/`slide.change`: Der Satzwechsel löscht sie nicht und lädt nichts neu
+        // Robustheit: Nach §22.4 lehnt der Core einen Wechsel mit Folienwechseln ab (409 `slide_deck_locked`), kommt er doch an
+        // (z. B. nach gelöschten `slide_events`), gilt: Die Position kommt allein aus `slide_events`/`slide.change`,
+        // der Satzwechsel löscht sie nicht und lädt nichts neu
         XCTAssertEqual(rig.follower.currentSlide, slide)
         XCTAssertEqual(rig.backend.snapshotCalls, 1)
 
@@ -134,7 +136,7 @@ final class SessionFollowerDeckSwitchTests: XCTestCase {
         XCTAssertEqual(rig.backend.snapshotCalls, 1)
     }
 
-    func testTheSameDeckAgainDoesNotReloadAndDoesNotFireOnChange() async {
+    func testTheSameDeckAgainDoesNotReloadAndAnIdenticalRepeatDoesNotFireOnChange() async {
         let rig = makeRig(deck: "deck-a")
         let counter = CallCounter()
         rig.follower.onChange = { counter.count += 1 }
