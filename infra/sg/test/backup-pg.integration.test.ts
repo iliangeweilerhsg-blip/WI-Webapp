@@ -109,6 +109,28 @@ describe.skipIf(!BASE)('recordLeftovers gegen PostgreSQL (Nacharbeit Review #160
       `Ein alter Backup-Stand lässt sich seit mehreren Läufen nicht löschen (keine Berechtigung). Prüfe das Backup-Ziel und lösche den Ordner „${A}“ von Hand.`,
     );
   });
+
+  it('left === null (Ausdünnen lief nicht): nur warning wird gesetzt, thin_left bleibt, 500-Zeichen-CHECK hält', async () => {
+    const id = '019a4e14-0000-7000-8000-000000000111';
+    await run(id, 'fertig', '/ziel-null', 1, ['20261001T030000Z']);
+    const paths = ['media', 'vault', 'media'].map((d, i) => `${d}/${'ä😀'.repeat(60)}${i}.jpg`);
+    await recordLeftovers(
+      { pg, err: () => {}, cfg: { dataDir: '/nirgends', databaseUrl: BASE as string } },
+      id,
+      '/ziel-null',
+      null,
+      'Besitzer-Warnung: fremde Stände.',
+      { paths, previous: '20261001T030000Z' },
+    );
+    const [row] = await pg.query(
+      `SELECT array_to_string(thin_left, '/'), warning, char_length(warning) FROM backup_run WHERE id = :'id'::uuid`,
+      { id },
+    );
+    expect(row?.[0]).toBe('20261001T030000Z');
+    expect(row?.[1]).toContain('3 unveränderte Dateien weichen');
+    expect(row?.[1]).toContain('Besitzer-Warnung: fremde Stände.');
+    expect(Number(row?.[2])).toBeLessThanOrEqual(500);
+  });
 });
 
 describe.skipIf(!BASE)(
