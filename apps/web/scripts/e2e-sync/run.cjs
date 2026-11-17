@@ -641,6 +641,7 @@ const scenarios = {
     const t1 = await openHarness(context, 'follow-shared');
     await online(t1.page);
     const t2 = await openHarness(context, 'follow-shared');
+    let probe1;
     const state = (t) =>
       t.page.evaluate(() => ({
         state: window.__h.client.connectionState,
@@ -668,11 +669,28 @@ const scenarios = {
       live1 && (await state(t2)).state === 'other_tab',
       JSON.stringify(await state(t2)),
     );
+    // Sendeversuch im Folge-Tab: endet mit SyncNotLeaderError, nichts geht über die Mitlese-Verbindung
+    const probe2 = strokeOps(nb, 1);
+    const sent2 = await t2.page.evaluate((o) => window.__send(o), probe2);
+    check(
+      'Sendeversuch im Folge-Tab (Tab 2) endet mit SyncNotLeaderError',
+      sent2.notLeader === 1 && sent2.ok === 0 && sent2.other.length === 0,
+      JSON.stringify(sent2),
+    );
+    // Mitlese-Sockets: nur die, die ein Tab als Folge-Tab geöffnet hat (Zeitfenster der Rolle)
+    const tTake2 = Date.now();
     await t2.page.evaluate(() => window.__h.client.takeOver());
     await online(t2.page);
+    const sent1 = await t1.page.evaluate((o) => window.__send(o), (probe1 = strokeOps(nb, 1)));
+    check(
+      'Sendeversuch im Folge-Tab (Tab 1 nach Übernahme) endet mit SyncNotLeaderError',
+      sent1.notLeader === 1 && sent1.ok === 0 && sent1.other.length === 0,
+      JSON.stringify(sent1),
+    );
     await w.page.evaluate((o) => window.__send(o), strokeOps(nb, 2));
     const live2 = await waitFor(async () => (await got()) === 5, 5_000, 'nach Übernahme').catch(() => false);
     check('Nach „Hier übernehmen“ im lesenden Tab weiter live', live2);
+    const tBack = Date.now();
     await t1.page.evaluate(() => window.__h.client.takeOver());
     await online(t1.page);
     await waitFor(async () => (await state(t2)).link === 'online', 10_000, 'Tab 2 liest wieder mit');
@@ -685,10 +703,26 @@ const scenarios = {
       seqs.every((x, i) => i === 0 || x === seqs[i - 1] + 1),
       JSON.stringify(seqs),
     );
+    // Mitlese-Sockets: Tab 2 vor seiner Übernahme, Tab 1 zwischen Übernahme durch Tab 2 und Rückgabe
+    const followSockets = [
+      ...t2.sockets.filter((s) => s.url.endsWith('/sync') && s.openedAt < tTake2),
+      ...t1.sockets.filter((s) => s.url.endsWith('/sync') && s.openedAt >= tTake2 && s.openedAt < tBack),
+    ];
+    check(
+      'Es gibt Mitlese-Sockets (mit hello), sonst wäre die Prüfung leer',
+      followSockets.length >= 2 && followSockets.every((s) => s.frames.some((f) => f.msg?.type === 'hello')),
+      `${followSockets.length} Sockets`,
+    );
     check(
       'Mitlese-Verbindungen senden keine Operationen',
-      framesOf(t1.sockets.slice(1), 'out', 'op').length === 0 &&
-        framesOf(t2.sockets, 'out', 'op').length === 0,
+      followSockets.length >= 2 && framesOf(followSockets, 'out', 'op').length === 0,
+      `${framesOf(followSockets, 'out', 'op').length} Operationen`,
+    );
+    const onServer = new Set((await serverStrokes(nb)).strokes.map((x) => x.client_id));
+    const probeIds = [...probe2, ...probe1].map((i) => i.data.stroke.client_id);
+    check(
+      'Die Sendeversuche der Folge-Tabs liegen nicht auf dem Server',
+      probeIds.length === 2 && probeIds.every((id) => !onServer.has(id)),
     );
     await wctx.close();
     await context.close();

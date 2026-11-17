@@ -66,7 +66,7 @@ export function mergeSnapshot(state: MarkerState, snapshot: SessionSnapshot): Ma
   return { ...state, markers: [...fromServer, ...pending] };
 }
 
-type SyncSource = Pick<SyncClient, 'subscribe' | 'onEvent' | 'connectionState'>;
+type SyncSource = Pick<SyncClient, 'subscribe' | 'onEvent'>;
 
 export function useMarkers(sessionId: string, client: SyncSource | null) {
   const queryClient = useQueryClient();
@@ -150,7 +150,9 @@ function followMarkers(queryClient: QueryClient, sessionId: string, client: Sync
   };
 
   void establish();
-  const offConnection = client.onEvent('connection', (c) => {
+  // `link` (nicht `connection`): Im Folge-Tab bleibt `connection` bei `other_tab`, `link` zeigt die Mitlese-Verbindung
+  // (VERTRAEGE §11.8). Im Leader-Tab sind beide gleich.
+  const offConnection = client.onEvent('link', (c) => {
     if (c.state === 'online' && needsReload) void establish();
   });
   return () => {
