@@ -65,11 +65,27 @@ export interface MoodleSyncOptions {
 /** Ein Kurs bzw. alle zugeordneten Kurse (`null`) */
 type Scope = ReadonlySet<number> | null;
 
+/**
+ * Anlass eines Laufs. `vorlesung` ist ein interner Wert des Core (VERTRAEGE 17.8): Er steht nicht in
+ * `MoodleSyncTrigger` (Schema) und gelangt nie in eine Antwort der API.
+ */
+export type SyncTrigger = MoodleSyncTrigger | 'vorlesung';
+/** Ein Lauf mit internem Anlass. Kein diskriminierter Union-Typ: Die Zuweisung an `lastRun` braucht `isApiRun` */
+export type SyncRun = Omit<MoodleSyncRun, 'trigger'> & { trigger: SyncTrigger };
+
+/** Type-Guard: nur solche Läufe dürfen in `last_run` (und damit in die API) */
+export function isApiRun(run: SyncRun): run is MoodleSyncRun {
+  return run.trigger !== 'vorlesung';
+}
+
+/** Ergebnis von `runForLecture` */
+export type LectureRunResult = 'gestartet' | 'angehaengt' | 'gedeckt' | 'gestoppt';
+
 /** Ein angehängter Abgleich, der nach dem laufenden startet */
 interface Queued {
-  trigger: MoodleSyncTrigger;
+  trigger: SyncTrigger;
   scope: Set<number> | null;
-  promise: Promise<MoodleSyncRun>;
+  promise: Promise<SyncRun>;
 }
 
 class TokenInvalid extends Error {}
@@ -116,7 +132,7 @@ async function storeDownload(
   return { tmpPath, size, sha256: hash.digest('hex'), isPdf: size > 0 && head.includes(PDF_MAGIC) };
 }
 
-function emptyRun(trigger: MoodleSyncTrigger, startedAt: Date): MoodleSyncRun {
+function emptyRun(trigger: SyncTrigger, startedAt: Date): SyncRun {
   return {
     trigger,
     started_at: iso(startedAt),
@@ -140,9 +156,13 @@ export class MoodleSync {
   private readonly logger: SyncLogger | undefined;
   private readonly now: () => Date;
   private readonly maxImportBytes: number;
-  private current: Promise<MoodleSyncRun> | null = null;
+  private current: Promise<SyncRun> | null = null;
+  /** Umfang des laufenden Laufs (`null` = voller Lauf, `undefined` = keiner läuft). Wird mit `current` gelöscht */
+  private currentScope: Scope | undefined = undefined;
   private queued: Queued | null = null;
   private lastRun: MoodleSyncRun | null = null;
+  /** Letzter beendeter Lauf `vorlesung`: nur im Speicher, in keiner Antwort der API (17.8) */
+  private lastLecture: SyncRun | null = null;
   private stopped = false;
   /** Wird bei `stop()` ausgelöst und bricht einen laufenden Datei-Download ab */
   private readonly stopController = new AbortController();
@@ -179,7 +199,7 @@ export class MoodleSync {
    * Startet einen Abgleich. Läuft schon einer, wird genau ein weiterer danach angehängt (Kurse zusammengefasst).
    * Das Promise erfüllt sich mit dem Ergebnis des Laufs, der diese Anfrage abdeckt. Es wird nie verworfen.
    */
-  run(trigger: MoodleSyncTrigger, courseIds?: readonly number[]): Promise<MoodleSyncRun> {
+  run(trigger: SyncTrigger, courseIds?: readonly number[]): Promise<SyncRun> {
     const scope = courseIds ? new Set(courseIds) : null;
     if (this.stopped) return Promise.resolve(this.abortedRun(trigger));
     // Direkt nur, wenn weder einer läuft noch einer wartet: Zwischen dem Ende des laufenden und dem Start des
@@ -189,6 +209,8 @@ export class MoodleSync {
     }
     if (this.queued) {
       const queued = this.queued;
+      // `vorlesung` ist der schwächste Anlass: Eine andere Anfrage übernimmt ihn (und schreibt dann `last_run`)
+      if (queued.trigger === 'vorlesung') queued.trigger = trigger;
       if (queued.scope !== null) {
         if (scope === null) queued.scope = null;
         else for (const id of scope) queued.scope.add(id);
@@ -204,6 +226,28 @@ export class MoodleSync {
     });
     this.queued = entry as Queued;
     return entry.promise;
+  }
+
+  /** Der letzte beendete Lauf mit Anlass `vorlesung` (Tests, Protokoll). Schreibt `last_run` nicht */
+  get lastLectureRun(): SyncRun | null {
+    return this.lastLecture;
+  }
+
+  /**
+   * Abgleich zur Vorlesung (17.8) für die Kurse eines Moduls. Synchron, wirft nie, wartet nicht auf den Lauf.
+   * `gedeckt`: Der laufende oder der angehängte Lauf umfasst je für sich alle Kurse. Sonst `run('vorlesung', …)`.
+   */
+  runForLecture(courseIds: readonly number[]): LectureRunResult {
+    if (this.stopped) return 'gestoppt';
+    if (courseIds.length === 0) return 'gedeckt';
+    const covers = (scope: Scope | undefined): boolean =>
+      scope === null || (scope !== undefined && courseIds.every((id) => scope.has(id)));
+    // `currentScope` ist nur während eines Laufs gesetzt (wird mit `current` gelöscht): Nach dem Ende deckt er nichts mehr
+    if (covers(this.currentScope)) return 'gedeckt';
+    if (this.queued !== null && covers(this.queued.scope)) return 'gedeckt';
+    const busy = this.current !== null || this.queued !== null;
+    void this.run('vorlesung', courseIds);
+    return busy ? 'angehaengt' : 'gestartet';
   }
 
   /** Wartet, bis kein Abgleich mehr läuft (Tests, Herunterfahren) */
@@ -233,7 +277,7 @@ export class MoodleSync {
     clearTimeout(timer);
   }
 
-  private abortedRun(trigger: MoodleSyncTrigger): MoodleSyncRun {
+  private abortedRun(trigger: SyncTrigger): SyncRun {
     const run = emptyRun(trigger, this.now());
     run.ok = false;
     run.error_code = 'abgebrochen';
@@ -261,15 +305,17 @@ export class MoodleSync {
     };
   }
 
-  private begin(trigger: MoodleSyncTrigger, scope: Scope): Promise<MoodleSyncRun> {
+  private begin(trigger: SyncTrigger, scope: Scope): Promise<SyncRun> {
     const promise = this.execute(trigger, scope).finally(() => {
       this.current = null;
+      this.currentScope = undefined;
     });
     this.current = promise;
+    this.currentScope = scope;
     return promise;
   }
 
-  private async execute(trigger: MoodleSyncTrigger, scope: Scope): Promise<MoodleSyncRun> {
+  private async execute(trigger: SyncTrigger, scope: Scope): Promise<SyncRun> {
     const run = emptyRun(trigger, this.now());
     try {
       await this.syncAll(run, scope);
@@ -284,7 +330,9 @@ export class MoodleSync {
       this.logger?.warn({ err: error, trigger }, 'Moodle-Abgleich abgebrochen');
     }
     run.finished_at = iso(this.now());
-    this.lastRun = run;
+    // Ein Lauf `vorlesung` überschreibt `last_run` nicht (17.8)
+    if (isApiRun(run)) this.lastRun = run;
+    else this.lastLecture = run;
     this.logger?.info(
       {
         trigger,
@@ -299,7 +347,7 @@ export class MoodleSync {
     return run;
   }
 
-  private async syncAll(run: MoodleSyncRun, scope: Scope): Promise<void> {
+  private async syncAll(run: SyncRun, scope: Scope): Promise<void> {
     // Kein Zugang oder Token abgelehnt bzw. abgelaufen: Abgleich pausiert (F-MDL-01), statt Fehler zu sammeln
     const connection = (await this.moodle.status.getStatus()).state;
     if (connection === 'nicht_eingerichtet') {
@@ -343,7 +391,7 @@ export class MoodleSync {
   }
 
   /** Automatische Kurszuordnung (#141). Scheitert sie, gleicht der Lauf die bestehenden Zuordnungen trotzdem ab */
-  private async autoAssign(run: MoodleSyncRun): Promise<void> {
+  private async autoAssign(run: SyncRun): Promise<void> {
     try {
       const courses = await this.moodle.reader.courses();
       const result = await autoAssignCourses(this.db, courses.items, {
@@ -363,7 +411,7 @@ export class MoodleSync {
 
   // ---------- Dateien ----------
 
-  private async syncCourse(link: LinkRow, run: MoodleSyncRun): Promise<void> {
+  private async syncCourse(link: LinkRow, run: SyncRun): Promise<void> {
     const courseId = link.moodleCourseId;
     const contents = await this.moodle.reader.courseContents(courseId);
     // Sichtbare Dateien je Verweis. Versteckte gelten wie gelöschte als „in Moodle entfernt“ (F-MDL-04 Schritt 4)
@@ -484,7 +532,7 @@ export class MoodleSync {
     file: MoodleFile,
     modified: Date | null,
     moduleId: string,
-    run: MoodleSyncRun,
+    run: SyncRun,
   ): Promise<void> {
     const kind = row.kind as FileKind;
     const meta = { timemodified: modified, sizeBytes: file.size_bytes };
