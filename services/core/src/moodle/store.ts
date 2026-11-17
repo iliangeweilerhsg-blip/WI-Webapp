@@ -180,6 +180,26 @@ export async function activeLinks(db: DbOrTx, courseIds: readonly number[] | nul
 }
 
 /**
+ * Moodle-Kurse eines Moduls für den Abgleich zur Vorlesung (VERTRAEGE 17.8): dieselben Filter wie `activeLinks`
+ * (Abgleich an, Modul nicht gelöscht), aufsteigend. Ein unbekanntes oder gelöschtes Modul ergibt eine leere Liste.
+ */
+export async function activeCourseIdsOfModule(db: DbOrTx, moduleId: string): Promise<number[]> {
+  const rows = await db
+    .select({ id: moodleCourseLink.moodleCourseId })
+    .from(moodleCourseLink)
+    .innerJoin(courseModule, eq(courseModule.id, moodleCourseLink.moduleId))
+    .where(
+      and(
+        eq(moodleCourseLink.moduleId, moduleId),
+        eq(moodleCourseLink.syncEnabled, true),
+        notDeleted(courseModule),
+      ),
+    )
+    .orderBy(asc(moodleCourseLink.moodleCourseId));
+  return rows.map((row) => row.id);
+}
+
+/**
  * Zuordnung bestätigen oder ändern. Wechselt das Modul, ziehen die Fristen des Kurses mit. Schon übernommene
  * Foliensätze und Blätter bleiben im alten Modul (sie gehören dem Nutzer). Wechselt das Modul, gilt die Zuordnung
  * als von Hand (`auto = NULL`). Nur der Schalter „Abgleichen“ lässt den Vermerk der Automatik stehen.
