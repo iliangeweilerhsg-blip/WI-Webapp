@@ -3,11 +3,13 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useMemo, useSyncExternalStore } from 'react';
 import {
+  DeckOptionsSchema,
   ExerciseSheetListSchema,
   ExerciseSheetSchema,
   SlideDeckDetailSchema,
   SlideDeckListSchema,
   SlideDeckSchema,
+  type DeckOptions,
   type ExerciseSheet,
   type SlideDeck,
 } from '@sg/shared';
@@ -148,6 +150,49 @@ export function useDeckDetail(id: string, options: { enabled?: boolean } = {}) {
   });
 }
 
+export const deckOptionsKey = (moduleId: string, sessionId: string | null) =>
+  ['deck-options', moduleId, sessionId ?? ''] as const;
+
+/** `GET /modules/{id}/deck-options?session_id` (§22.3). Ohne `sessionId` gilt die Sicht für einen spontanen Start. */
+export function fetchDeckOptions(
+  moduleId: string,
+  sessionId: string | null,
+  signal?: AbortSignal,
+): Promise<DeckOptions> {
+  const query = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : '';
+  return apiGet(`/modules/${encodeURIComponent(moduleId)}/deck-options${query}`, DeckOptionsSchema, {
+    signal,
+  });
+}
+
+export interface DeckOptionsQueryOptions {
+  enabled?: boolean;
+  /** Abstand der Abfrage in ms, `false` = nur auf Anforderung */
+  refetchInterval?: number | false | ((data: DeckOptions | undefined) => number | false);
+  /** Nach dem Sichtbarwerden des Tabs neu laden */
+  refetchOnVisible?: boolean;
+}
+
+/** Momentaufnahme der wählbaren Foliensätze eines Moduls, aus Sicht einer Session (§22.3) */
+export function useDeckOptions(
+  moduleId: string,
+  sessionId: string | null,
+  { enabled = true, refetchInterval = false, refetchOnVisible = false }: DeckOptionsQueryOptions = {},
+) {
+  return useQuery({
+    queryKey: deckOptionsKey(moduleId, sessionId),
+    queryFn: ({ signal }) => fetchDeckOptions(moduleId, sessionId, signal),
+    enabled: enabled && moduleId !== '',
+    // Eine Momentaufnahme: kurz gültig, damit ein neuer Satz beim nächsten Öffnen da ist
+    staleTime: refetchOnVisible ? 0 : 10_000,
+    refetchOnWindowFocus: refetchOnVisible,
+    refetchInterval: (query) =>
+      typeof refetchInterval === 'function' ? refetchInterval(query.state.data) : refetchInterval,
+    // Nur im sichtbaren Tab (§22.6)
+    refetchIntervalInBackground: false,
+  });
+}
+
 export function useSheetDetail(id: string, options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: ['sheet', id],
@@ -164,6 +209,8 @@ function invalidateMaterial(client: QueryClient) {
     client.invalidateQueries({ queryKey: ['sheets'] }),
     client.invalidateQueries({ queryKey: ['deck'] }),
     client.invalidateQueries({ queryKey: ['sheet'] }),
+    // Neue und gelöschte Sätze ändern Liste und Vorschlag der Folienwahl (§22.3)
+    client.invalidateQueries({ queryKey: ['deck-options'] }),
   ]);
 }
 

@@ -53,6 +53,7 @@ Der Dialog endet bei den Modulen. Alles Weitere stellst du selbst ein.
 |---|---|---|
 | Stundenplan | **Kalender**, Bereich „Stundenplan importieren“: ICS-Datei mit **Datei importieren** oder Adresse mit **Abonnieren** | Eine eigene Anleitung gibt es noch nicht |
 | Moodle | Terminal: `pnpm sg moodle login` | [MOODLE.md](MOODLE.md), bei Problemen [MOODLE-TOKEN.md](MOODLE-TOKEN.md) |
+| Folien | Kommen aus Moodle oder per **PDF auswählen** (Modul, Tab **Vorlesungen**). Auf **Heute** zeigt die Karte vor dem Start „Folien: …“ | [VORLESUNGSTAG.md](VORLESUNGSTAG.md), Abschnitt „Folien“ |
 | Mikrofon | **Einstellungen → Vorlesung → Mikrofon**. Der Browser fragt beim ersten Aufnehmen nach der Erlaubnis | Einen eigenen Mikrofontest gibt es noch nicht. Mach vor der ersten Vorlesung eine kurze Probe-Session |
 | Transkription | Worker-Pakete einmal laden | [TRANSKRIPTION.md](TRANSKRIPTION.md) |
 | Backup | **Einstellungen → Daten und Papierkorb**: Backup-Ziel eintragen, **Speichern**, dann **Jetzt sichern** | [BACKUP-WIEDERHERSTELLEN.md](BACKUP-WIEDERHERSTELLEN.md) |

@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import type { Module, Session } from '@sg/shared';
 import { ApiRequestError, friendlyMessage } from '../../lib/api.ts';
+import { useDeckOptions } from '../../lib/material.ts';
 import {
   ACTIVE_SESSION_KEY,
   applyActiveSession,
@@ -55,7 +56,7 @@ function useSpontaneousStart(onSession?: (session: Session) => void) {
     [],
   );
 
-  async function start(moduleId: string) {
+  async function start(moduleId: string, slideDeckId?: string) {
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
@@ -65,7 +66,7 @@ function useSpontaneousStart(onSession?: (session: Session) => void) {
     pending.current = { moduleId, id };
     try {
       noteMicIntent(id);
-      const result = await createAndStartSession(moduleId, id);
+      const result = await createAndStartSession(moduleId, id, slideDeckId);
       pending.current = null;
       rememberLastModuleId(moduleId);
       // Auch auf der Modulseite (ohne `onSession`) soll der Tab die neue Session sofort kennen
@@ -105,6 +106,51 @@ function useSpontaneousStart(onSession?: (session: Session) => void) {
   return { start, busy, error };
 }
 
+/**
+ * Folien beim spontanen Start (VERTRAEGE §22.7): `deck-options` ohne Session für das gewählte Modul. Der Vorschlag steht
+ * als Zeile unter dem Modul und geht als `slide_deck_id` in `POST /sessions` mit; „Ohne Folien“ ist ein Klick.
+ * Keine Liste: Wer einen anderen Satz will, wählt ihn in der Live-Ansicht. Der Start wartet nie auf die Abfrage.
+ */
+function useSpontaneousDeck(moduleId: string, enabled = true) {
+  const query = useDeckOptions(moduleId, null, { enabled });
+  const [none, setNone] = useState(false);
+  useEffect(() => setNone(false), [moduleId]);
+  const suggestedId = query.data?.suggested_deck_id ?? null;
+  const suggestion = query.data?.items.find((item) => item.deck.id === suggestedId) ?? null;
+  return {
+    suggestion,
+    none,
+    setNone,
+    /** Satz für `POST /sessions`; `undefined` = ohne das Feld */
+    deckId: !none && suggestion ? suggestion.deck.id : undefined,
+  };
+}
+
+const linkButton =
+  'inline-flex min-h-11 items-center rounded-md px-3 text-md text-text-muted underline underline-offset-4 hover:bg-surface-raised hover:text-text';
+
+function SpontaneousDeckRow({ deck }: { deck: ReturnType<typeof useSpontaneousDeck> }) {
+  const { suggestion } = deck;
+  if (!suggestion) return null;
+  return (
+    <div data-testid="spontan-deck" className="mt-2 flex flex-wrap items-center gap-x-1">
+      <p className="text-md">
+        {deck.none ? (
+          'Ohne Folien'
+        ) : (
+          <>
+            Folien: <span className="font-medium">{suggestion.deck.title}</span>
+            {suggestion.source === 'moodle' ? <span className="text-text-muted"> aus Moodle</span> : null}
+          </>
+        )}
+      </p>
+      <button type="button" className={linkButton} onClick={() => deck.setNone(!deck.none)}>
+        {deck.none ? 'Folien nehmen' : 'Ohne Folien'}
+      </button>
+    </div>
+  );
+}
+
 export interface SpontaneousStartCardProps {
   modules: readonly Module[];
   /** Sessions des Tages; das Modul der jüngsten dient als Vorauswahl, wenn nichts gespeichert ist */
@@ -123,6 +169,29 @@ export function SpontaneousStartCard({ modules, sessions, onSession }: Spontaneo
   const known = (id: string | null | undefined): id is string => !!id && modules.some((m) => m.id === id);
   const latest = [...sessions].sort((a, b) => sessionAnchor(b) - sessionAnchor(a))[0]?.module_id;
   const selected = [chosen, stored, latest].find(known) ?? modules[0]?.id ?? '';
+  return (
+    <SpontaneousCardBody
+      modules={modules}
+      selected={selected}
+      onChoose={setChosen}
+      start={start}
+      busy={busy}
+      error={error}
+    />
+  );
+}
+
+interface BodyProps {
+  modules: readonly Module[];
+  selected: string;
+  onChoose: (id: string) => void;
+  start: (moduleId: string, slideDeckId?: string) => Promise<void>;
+  busy: boolean;
+  error: string | null;
+}
+
+function SpontaneousCardBody({ modules, selected, onChoose, start, busy, error }: BodyProps) {
+  const deck = useSpontaneousDeck(selected);
 
   return (
     <section aria-labelledby="spontan-title" className="rounded-lg border border-border bg-surface px-4 py-4">
@@ -137,7 +206,7 @@ export function SpontaneousStartCard({ modules, sessions, onSession }: Spontaneo
           Modul
           <select
             value={selected}
-            onChange={(e) => setChosen(e.target.value)}
+            onChange={(e) => onChoose(e.target.value)}
             className="mt-1 block min-h-11 rounded-md border border-border-strong bg-bg px-3 py-2 text-md"
           >
             {modules.map((m) => (
@@ -152,11 +221,12 @@ export function SpontaneousStartCard({ modules, sessions, onSession }: Spontaneo
           className={primary}
           aria-disabled={busy}
           aria-busy={busy}
-          onClick={() => void start(selected)}
+          onClick={() => void start(selected, deck.deckId)}
         >
           {busy ? 'Wird gestartet …' : 'Session starten'}
         </button>
       </div>
+      <SpontaneousDeckRow deck={deck} />
       {error ? (
         <p role="alert" className="mt-3 text-sm text-danger">
           {error}
@@ -170,8 +240,10 @@ export function SpontaneousStartCard({ modules, sessions, onSession }: Spontaneo
 export function ModuleSessionButton({ moduleId }: { moduleId: string }) {
   const active = useActiveSession();
   const { start, busy, error } = useSpontaneousStart();
-  if (active.isPending) return null;
   const running = active.data ?? null;
+  // Läuft schon eine Session, gibt es hier nichts zu starten und nichts abzufragen
+  const deck = useSpontaneousDeck(moduleId, !active.isPending && running === null);
+  if (active.isPending) return null;
 
   return (
     <div className="mt-4">
@@ -185,11 +257,12 @@ export function ModuleSessionButton({ moduleId }: { moduleId: string }) {
           className={secondary}
           aria-disabled={busy}
           aria-busy={busy}
-          onClick={() => void start(moduleId)}
+          onClick={() => void start(moduleId, deck.deckId)}
         >
           {busy ? 'Wird gestartet …' : 'Session starten'}
         </button>
       )}
+      {running ? null : <SpontaneousDeckRow deck={deck} />}
       {error ? (
         <p role="alert" className="mt-2 text-sm text-danger">
           {error}

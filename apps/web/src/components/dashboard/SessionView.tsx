@@ -211,6 +211,7 @@ function SessionScreen() {
                 active={active}
                 startedAt={session.started_at ? Date.parse(session.started_at) : null}
                 client={sync}
+                onSession={data.apply}
               />
             ),
             uebung: <ExerciseColumn />,

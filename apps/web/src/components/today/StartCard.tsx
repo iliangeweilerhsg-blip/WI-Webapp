@@ -14,6 +14,7 @@ import {
   isDashboardAvailable,
   pauseSession,
   resumeSession,
+  retryWithoutDeck,
   sessionHref,
   startSession,
   stopSession,
@@ -23,6 +24,7 @@ import { useRecordingFor, type RecordingKind } from '../../lib/recording';
 import { formatSize, lecturesThatFit, useSystemStorage } from '../../lib/storage.ts';
 import { isBatteryLowForStart, useSystemPower } from '../../lib/system.ts';
 import { rueckblickHref } from '../../lib/transcript.ts';
+import { StartDeckRow, useStartDeck } from './StartDeck.tsx';
 import { useNow } from './use-today.ts';
 import {
   READY_LEAD_MS,
@@ -105,6 +107,12 @@ export function StartCard({
   const stateAtRun = useRef<string | null>(null);
 
   const state = session ? cardState(session, now) : null;
+  // Folien (§22.7): nur Karten mit Start-Knopf fragen `deck-options` ab; der Start wartet nie darauf
+  const startDeck = useStartDeck(
+    session ?? undefined,
+    state === 'bevorstehend' || state === 'bereit',
+    onSession,
+  );
   // Eine neue Lage macht die alte Fehlermeldung hinfällig
   useEffect(() => setError(null), [session?.id, session?.state]);
   useEffect(() => setEnded(false), [session?.id]);
@@ -148,7 +156,10 @@ export function StartCard({
     try {
       if (action === 'start') {
         noteMicIntent(session.id);
-        const result = await startSession(session.id);
+        // Der Vorschlag geht mit; lehnt der Core den Satz ab, startet die Karte einmal ohne (§22.7)
+        const result = await retryWithoutDeck(startDeck.startDeckId, (deckId) =>
+          startSession(session.id, 'mac', deckId),
+        );
         onSession(result.session);
         if (result.ended_session) {
           onSession(result.ended_session);
@@ -235,6 +246,7 @@ export function StartCard({
           <p className="mt-2 text-md">
             {detail(state, { now, startsInMs, plannedStart, startedAt, session, recKind })}
           </p>
+          {canStart ? <StartDeckRow deck={startDeck} sessionId={session.id} /> : null}
           {state === 'verpasst' ? (
             <p className="mt-1 text-md">
               <a href="#spontan-title" className="underline underline-offset-4">

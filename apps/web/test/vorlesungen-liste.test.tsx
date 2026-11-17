@@ -167,7 +167,12 @@ describe('Modul: Vorlesungen (UX-307)', () => {
     ).toBe(true);
     // Der Core sortiert (`order=desc`) und begrenzt; der Client holt nicht alle Seiten
     const listCalls = core.requests.filter(
-      (r) => r.method === 'GET' && r.path.startsWith('/sessions?') && r.path.includes('module_id='),
+      (r) =>
+        r.method === 'GET' &&
+        r.path.startsWith('/sessions?') &&
+        r.path.includes('module_id=') &&
+        // Nicht die Auswahl „Für Vorlesung“ beim Folien-Upload (heutige, noch offene Sessions, §22.7)
+        !r.path.includes('state=geplant'),
     );
     expect(listCalls.length).toBeGreaterThan(0);
     for (const call of listCalls) {

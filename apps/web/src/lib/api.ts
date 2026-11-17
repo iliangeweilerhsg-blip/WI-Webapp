@@ -55,6 +55,12 @@ const CODE_MESSAGES: Record<string, string> = {
   session_exists: 'Zu diesem Termin gibt es schon eine Session.',
   session_one_active: 'Es läuft schon eine Session.',
   idempotency_key_in_progress: 'Die Datei wird gerade schon hochgeladen.',
+  // Folien in der Vorlesung (VERTRAEGE §22.10)
+  slide_deck_locked: 'Der Foliensatz bleibt, weil in dieser Vorlesung schon geblättert wurde.',
+  slide_deck_session_closed: 'Diese Vorlesung ist schon beendet. Folien lassen sich ihr nicht mehr zuordnen.',
+  slide_deck_not_found: 'Dieser Foliensatz ist nicht mehr da.',
+  slide_deck_module_mismatch: 'Dieser Foliensatz gehört zu einem anderen Modul.',
+  session_module_mismatch: 'Diese Vorlesung gehört zu einem anderen Modul.',
   // Nur am Mac selbst erlaubt (z. B. „Jetzt sichern“, „Jetzt testen“ von einem gekoppelten Gerät, #113)
   local_only: 'Das geht nur direkt am Mac.',
   // Inbox der Vorschläge (VERTRAEGE §20.11)

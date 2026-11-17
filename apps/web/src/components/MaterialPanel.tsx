@@ -3,7 +3,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react';
-import type { ExerciseSheet, SlideDeck } from '@sg/shared';
+import type { ExerciseSheet, Session, SlideDeck } from '@sg/shared';
 import { friendlyMessage } from '../lib/api.ts';
 import {
   KIND_WORDS,
@@ -23,6 +23,7 @@ import {
   type MaterialKind,
 } from '../lib/material.ts';
 import { UNDO_WINDOW_MS } from '../lib/modules.ts';
+import { isActive, sessionAnchor, sessionLabel, useDeckUploadSessions } from '../lib/sessions.ts';
 import { useToast } from '../lib/toast.tsx';
 import { useUploads, type UploadEntry } from '../lib/uploads.tsx';
 import { CoreHint } from './CoreHint.tsx';
@@ -282,6 +283,58 @@ function MaterialRow({ row, thumb }: { row: RowModel; thumb: React.ReactNode }) 
   );
 }
 
+const CLOCK = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' });
+
+function targetLabel(session: Session): string {
+  const anchor = sessionAnchor(session);
+  const clock = Number.isNaN(anchor) ? null : `${CLOCK.format(new Date(anchor))} Uhr`;
+  return [sessionLabel(session), clock, isActive(session) ? 'läuft' : null].filter(Boolean).join(' · ');
+}
+
+/**
+ * „Für Vorlesung“ (VERTRAEGE §22.7): optional, nur Sessions des Moduls von heute ohne Satz. Standard ist die laufende,
+ * sonst „keine“. Ein Satz ersetzt hier nie etwas: Wechseln geht nur in der Live-Ansicht.
+ */
+function useUploadSession(moduleId: string) {
+  const query = useDeckUploadSessions(moduleId);
+  const [chosen, setChosen] = useState<string | null | undefined>(undefined);
+  const sessions = query.data ?? [];
+  const running = sessions.find(isActive)?.id ?? null;
+  const wanted = chosen === undefined ? running : chosen;
+  // Eine Session, die inzwischen einen Satz hat (oder weg ist), steht nicht mehr zur Wahl
+  const sessionId = wanted !== null && sessions.some((s) => s.id === wanted) ? wanted : null;
+  return { sessions, sessionId, choose: setChosen };
+}
+
+function ForSession({
+  sessions,
+  sessionId,
+  onChoose,
+}: {
+  sessions: readonly Session[];
+  sessionId: string | null;
+  onChoose: (id: string | null) => void;
+}) {
+  if (sessions.length === 0) return null;
+  return (
+    <label className="mb-2 flex flex-wrap items-center justify-end gap-2 text-sm font-medium">
+      Für Vorlesung
+      <select
+        value={sessionId ?? ''}
+        onChange={(e) => onChoose(e.target.value || null)}
+        className="min-h-11 rounded-md border border-border-strong bg-bg px-3 py-2 text-md font-normal"
+      >
+        <option value="">keine</option>
+        {sessions.map((s) => (
+          <option key={s.id} value={s.id}>
+            {targetLabel(s)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function PanelShell({
   kind,
   moduleId,
@@ -289,6 +342,8 @@ function PanelShell({
   error,
   empty,
   onOpen,
+  sessionId,
+  header,
   children,
 }: {
   kind: MaterialKind;
@@ -297,11 +352,22 @@ function PanelShell({
   error: unknown;
   empty: boolean;
   onOpen: OpenDocument;
+  /** „Für Vorlesung“: nur bei Foliensätzen */
+  sessionId?: string | null;
+  header?: React.ReactNode;
   children: React.ReactNode;
 }) {
-  const { entries, enqueue, dragging } = useUploads();
+  const { entries, enqueue, dragging, setDropSession } = useUploads();
   const own = entries.filter((e) => e.moduleId === moduleId && e.kind === kind);
-  const picker = useFilePicker((files) => enqueue(files, { moduleId, kind, open: onOpen }));
+  const forSession = kind === 'folien' ? (sessionId ?? null) : null;
+  const picker = useFilePicker((files) =>
+    enqueue(files, { moduleId, kind, open: onOpen, ...(forSession ? { sessionId: forSession } : {}) }),
+  );
+  // Dateien, die ins Fenster fallen, gehören derselben Vorlesung wie die mit dem Knopf gewählten
+  useEffect(() => {
+    setDropSession(moduleId, forSession);
+    return () => setDropSession(moduleId, null);
+  }, [setDropSession, moduleId, forSession]);
   const noun = kind === 'folien' ? 'Folien' : 'Übungsblätter';
 
   return (
@@ -310,6 +376,7 @@ function PanelShell({
       className="rounded-lg border border-transparent data-[dragging=true]:border-dashed data-[dragging=true]:border-accent data-[dragging=true]:bg-accent-soft"
     >
       {picker.field}
+      {error ? null : header}
       {error ? (
         <CoreHint error={error} />
       ) : loading ? (
@@ -344,6 +411,7 @@ function PanelShell({
 function DeckPanel({ moduleId, onOpen }: { moduleId: string; onOpen: OpenDocument }) {
   const query = useDecks(moduleId);
   const decks = useVisibleItems('folien', query.data);
+  const target = useUploadSession(moduleId);
   return (
     <PanelShell
       kind="folien"
@@ -352,6 +420,8 @@ function DeckPanel({ moduleId, onOpen }: { moduleId: string; onOpen: OpenDocumen
       error={query.isError ? query.error : null}
       empty={decks?.length === 0}
       onOpen={onOpen}
+      sessionId={target.sessionId}
+      header={<ForSession sessions={target.sessions} sessionId={target.sessionId} onChoose={target.choose} />}
     >
       {decks && decks.length > 0 ? (
         <ul aria-label="Foliensätze" className="mt-3 flex flex-col gap-2">
