@@ -379,7 +379,7 @@ describe('SlidesPanel: fremde Wechsel und Cache', () => {
     await expect(opts.onReset()).rejects.toBeDefined();
     core.down = false;
     core.slideEvents = [slideEvent(8, 900_000)];
-    await sync.emit('link', { state: 'online', retryInMs: null, closeCode: null });
+    await sync.emit('link', { state: 'online' });
     await waitFor(() => expect(sync.subscribe).toHaveBeenCalledTimes(2));
     await showing('Folie 8 / 20');
     expect(sync.unsubscribe).toHaveBeenCalledTimes(1);

@@ -7,6 +7,7 @@
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect } from 'react';
 import type { SessionSnapshot, SyncOp } from '@sg/shared';
+import { nextRetryDelay, RETRY_START_MS } from '../../../lib/retry.ts';
 import { fetchSessionSnapshot, sessionStreamId } from '../../../lib/session-stream.ts';
 import type { SyncClient } from '../../../lib/sync/client.ts';
 
@@ -71,6 +72,8 @@ function followSlides(queryClient: QueryClient, sessionId: string, client: SyncS
   let unsubscribe: (() => void) | null = null;
   let running = false;
   let needsReload = false;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let retryDelay = RETRY_START_MS;
 
   /** Snapshot übernehmen, wenn er neuer ist als der lokale Stand; Rückgabe: Position für das Abonnement */
   const load = async () => {
@@ -88,8 +91,20 @@ function followSlides(queryClient: QueryClient, sessionId: string, client: SyncS
     queryClient.setQueryData<SlidePosition>(key, { index: op.data.slide_index, tMs: op.data.t_ms });
   };
 
+  const clearRetry = () => {
+    if (retryTimer !== null) clearTimeout(retryTimer);
+    retryTimer = null;
+  };
+
+  const scheduleRetry = () => {
+    clearRetry();
+    retryTimer = setTimeout(() => void establish(), retryDelay);
+    retryDelay = nextRetryDelay(retryDelay);
+  };
+
   const establish = async () => {
     if (running || cancelled) return;
+    clearRetry();
     running = true;
     try {
       const from = await load();
@@ -109,8 +124,11 @@ function followSlides(queryClient: QueryClient, sessionId: string, client: SyncS
           },
         }) ?? null;
       needsReload = false;
+      retryDelay = RETRY_START_MS;
     } catch {
       needsReload = true;
+      // Ist `link` schon `online`, kommt kein Ereignis mehr: selbst mit wachsender Wartezeit wiederholen
+      if (!cancelled) scheduleRetry();
     } finally {
       running = false;
     }
@@ -119,12 +137,23 @@ function followSlides(queryClient: QueryClient, sessionId: string, client: SyncS
   void establish();
   // `link` (nicht `connection`): Im Folge-Tab bleibt `connection` bei `other_tab`, `link` zeigt die Mitlese-Verbindung
   // (VERTRAEGE §11.8). Im Leader-Tab sind beide gleich.
-  const offConnection = client.onEvent('link', (c) => {
-    if (c.state === 'online' && needsReload) void establish();
+  const offLink = client.onEvent('link', (c) => {
+    if (c.state !== 'online') return;
+    retryDelay = RETRY_START_MS;
+    if (needsReload) void establish();
+  });
+  // Scheitert der Abgleich nach einem `reset` bei schon stehender Verbindung, kommt kein `link`-Ereignis mehr:
+  // für den eigenen Strom selbst neu aufbauen (wie `InkColumn`)
+  const offResetFailed = client.onEvent('reset.failed', (f) => {
+    if (f.stream !== stream || cancelled) return;
+    needsReload = true;
+    scheduleRetry();
   });
   return () => {
     cancelled = true;
-    offConnection();
+    clearRetry();
+    offLink();
+    offResetFailed();
     unsubscribe?.();
     unsubscribe = null;
   };

@@ -1,13 +1,14 @@
 // Folge-Tab (VERTRAEGE §11.8): `connection` bleibt dort `other_tab`, die Mitlese-Verbindung meldet sich über `link`.
 // Scheitert das erste Laden (Core lief beim Öffnen noch nicht), müssen Marker und Folienposition neu laden, sobald
 // `link` `online` wird (Issue #381).
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import type { Marker, SlideEvent } from '@sg/shared';
 import { useMarkers } from '../src/components/dashboard/markers/use-markers.ts';
 import { useSlidePosition } from '../src/components/dashboard/slides/use-slide-position.ts';
+import { sessionStreamId } from '../src/lib/session-stream.ts';
 import { makeQueryClient } from '../src/lib/query.tsx';
 import type { SyncClient } from '../src/lib/sync/client.ts';
 import { installFakeCore, makeSession, type FakeCore } from './fake-core.ts';
@@ -113,5 +114,151 @@ describe('Folge-Tab: Neuladen über link', () => {
     await waitFor(() => expect(sync.subscribe).toHaveBeenCalledTimes(1));
     expect(snapshotCalls()).toBe(1);
     expect(result.current.position).toEqual({ index: 6, tMs: 5000 });
+  });
+});
+
+/** Leader-Tab (oder Folge-Tab mit stehender Mitlese-Verbindung): `link` ist schon `online`, es kommt kein Ereignis mehr */
+function onlineClient() {
+  const subscribe = vi.fn(() => () => undefined);
+  const raw = {
+    connectionState: 'online',
+    linkState: 'online',
+    subscribe,
+    onEvent: vi.fn(() => () => undefined),
+  };
+  return { client: raw as unknown as SyncClient, subscribe };
+}
+
+describe('Erstes Laden scheitert, obwohl link schon online ist', () => {
+  afterEach(() => vi.useRealTimers());
+  const advance = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+
+  it('Marker: wiederholt mit wachsender Wartezeit, danach steht das Abo', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const sync = onlineClient();
+    renderHook(() => useMarkers(SESSION_ID, sync.client), { wrapper });
+    await advance(0); // 1. Versuch scheitert
+    await advance(1_000); // 2. Versuch scheitert
+    expect(sync.subscribe).not.toHaveBeenCalled();
+    core.down = false;
+    await advance(1_500); // nächster Versuch erst nach 2 s: noch nichts
+    expect(sync.subscribe).not.toHaveBeenCalled();
+    await advance(500);
+    expect(sync.subscribe).toHaveBeenCalledTimes(1);
+    await advance(60_000); // danach keine weiteren Versuche
+    expect(sync.subscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('Folienposition: wiederholt mit wachsender Wartezeit, danach steht das Abo', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const sync = onlineClient();
+    renderHook(() => useSlidePosition(SESSION_ID, sync.client), { wrapper });
+    await advance(0);
+    await advance(1_000);
+    expect(sync.subscribe).not.toHaveBeenCalled();
+    core.down = false;
+    await advance(1_500);
+    expect(sync.subscribe).not.toHaveBeenCalled();
+    await advance(500);
+    expect(sync.subscribe).toHaveBeenCalledTimes(1);
+    await advance(60_000);
+    expect(sync.subscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('Aushängen beendet die Wiederholung', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const sync = onlineClient();
+    const { unmount } = renderHook(() => useMarkers(SESSION_ID, sync.client), { wrapper });
+    await advance(0);
+    unmount();
+    core.down = false;
+    await advance(60_000);
+    expect(sync.subscribe).not.toHaveBeenCalled();
+  });
+});
+
+/** Client mit steuerbaren Ereignissen; `subscribe` merkt sich die Handler (`onReset`) */
+function eventClient(link: string) {
+  const listeners = new Map<string, Set<(data: unknown) => void>>();
+  const subscribe = vi.fn(
+    (..._args: unknown[]) =>
+      () =>
+        undefined,
+  );
+  const raw = {
+    connectionState: link,
+    linkState: link,
+    subscribe,
+    onEvent: vi.fn((name: string, fn: (data: unknown) => void) => {
+      const set = listeners.get(name) ?? new Set();
+      set.add(fn);
+      listeners.set(name, set);
+      return () => void set.delete(fn);
+    }),
+  };
+  return {
+    client: raw as unknown as SyncClient,
+    subscribe,
+    emit: (name: string, data: unknown) => act(() => listeners.get(name)?.forEach((fn) => fn(data))),
+  };
+}
+
+const HOOKS = [
+  ['Marker', (c: SyncClient) => useMarkers(SESSION_ID, c)],
+  ['Folienposition', (c: SyncClient) => useSlidePosition(SESSION_ID, c)],
+] as const;
+
+describe.each(HOOKS)('%s: Wiederholung und Wartezeit', (_name, useHook) => {
+  afterEach(() => vi.useRealTimers());
+  const advance = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+
+  it('Abgleich nach reset scheitert bei stehender Verbindung: der eigene Strom wird neu aufgebaut', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    core.down = false;
+    const sync = eventClient('online');
+    renderHook(() => useHook(sync.client), { wrapper });
+    await advance(0);
+    expect(sync.subscribe).toHaveBeenCalledTimes(1);
+    const onReset = (sync.subscribe.mock.calls[0]![3] as { onReset: () => Promise<unknown> }).onReset;
+    core.down = true;
+    await expect(act(() => onReset())).rejects.toThrow();
+    // Fremder Strom: nichts passiert
+    await sync.emit('reset.failed', { stream: 'notebook:x', error: new Error('x') });
+    core.down = false;
+    await advance(60_000);
+    expect(sync.subscribe).toHaveBeenCalledTimes(1);
+    await sync.emit('reset.failed', { stream: sessionStreamId(SESSION_ID), error: new Error('x') });
+    await advance(1_000);
+    expect(sync.subscribe).toHaveBeenCalledTimes(2);
+    await advance(60_000);
+    expect(sync.subscribe).toHaveBeenCalledTimes(2);
+  });
+
+  it('link online bei wartendem Timer: genau eine Wiederholungskette, der alte Timer ist weg', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const sync = eventClient('connecting');
+    renderHook(() => useHook(sync.client), { wrapper });
+    await advance(0); // 1. Versuch scheitert, Timer (1 s) wartet
+    core.down = false;
+    await sync.emit('link', { state: 'online' });
+    await advance(0);
+    expect(sync.subscribe).toHaveBeenCalledTimes(1);
+    await advance(60_000); // der alte Timer hätte noch einmal aufgebaut
+    expect(sync.subscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('link online setzt die Wartezeit zurück', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const sync = eventClient('connecting');
+    renderHook(() => useHook(sync.client), { wrapper });
+    await advance(0); // scheitert, nächste Wartezeit 1 s
+    await advance(1_000); // scheitert, 2 s
+    await advance(2_000); // scheitert, 4 s
+    await advance(4_000); // scheitert, 8 s
+    await sync.emit('link', { state: 'online' }); // scheitert wieder: Wartezeit beginnt von vorn
+    await advance(0);
+    core.down = false;
+    await advance(1_000);
+    expect(sync.subscribe).toHaveBeenCalledTimes(1);
   });
 });

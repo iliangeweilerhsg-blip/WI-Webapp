@@ -42,6 +42,7 @@ function fakeSync(state = 'online') {
   const listeners = new Map<string, Set<(data: unknown) => void>>();
   const client = {
     connectionState: state,
+    linkState: state,
     connect: vi.fn(async () => undefined),
     disconnect: vi.fn(),
     onEvent: vi.fn((name: string, fn: (data: unknown) => void) => {
@@ -60,11 +61,20 @@ function fakeSync(state = 'online') {
       act(() => {
         for (const fn of listeners.get(name) ?? []) fn(data);
       }),
+    /** Nur die Mitlese-Verbindung eines Folge-Tabs: `connectionState` bleibt `other_tab` */
+    setLink(next: string) {
+      client.linkState = next;
+      act(() => {
+        for (const fn of listeners.get('link') ?? []) fn({ state: next });
+      });
+    },
     setState(next: string) {
       client.connectionState = next;
+      client.linkState = next;
       act(() => {
         for (const fn of listeners.get('connection') ?? [])
           fn({ state: next, retryInMs: null, closeCode: null });
+        for (const fn of listeners.get('link') ?? []) fn({ state: next });
       });
     },
   };
@@ -158,6 +168,21 @@ describe('useActiveSession: Abfrage nur ohne Live-Verbindung', () => {
     const before = activeGets().length;
     await advance(60_000);
     expect(activeGets().length).toBeLessThanOrEqual(before + 1); // höchstens das Nachladen beim Wiederverbinden
+  });
+
+  it('Folge-Tab: bricht die Mitlese-Verbindung ab und wird wieder online, wird neu geladen', async () => {
+    boot('other_tab', [session(A_ID)]);
+    await waitFor(() => expect(shown()).toBe(A_ID));
+    expect(activeGets()).toHaveLength(1);
+    sync.setLink('online');
+    await advance(100);
+    expect(activeGets()).toHaveLength(2); // die Verbindung stand beim Öffnen noch nicht
+    sync.setLink('backoff');
+    await advance(100);
+    expect(activeGets()).toHaveLength(2);
+    sync.setLink('online');
+    await advance(100);
+    expect(activeGets()).toHaveLength(3);
   });
 
   it('leader.changed lädt neu', async () => {
