@@ -3,6 +3,8 @@
 Gilt für Moodle.UP (`https://moodle2.uni-potsdam.de`, Anmeldung über UP-SSO/Shibboleth). Der Token gilt **12 Wochen**. Danach diese Schritte wiederholen. Dauer: etwa 2 Minuten.
 Hintergrund: F-MDL-01 (Kap. 04), 08 §9.1. Das ist der Weg, wenn `pnpm sg moodle login` mit Benutzername und Passwort nicht geht (SSO-Konto). Überblick: [MOODLE.md](MOODLE.md).
 
+Für die Abgabe aus der App brauchst du denselben Token, sofern Moodle ihm die Funktion erlaubt ([MOODLE.md](MOODLE.md), Abschnitt „Freischalten“). Die Abgabe ist noch nicht an einem echten Moodle geprüft. Der Schalter `SG_MOODLE_ACTIONS` in der `.env` bleibt bestehen, er gehört nicht zum Token ([MOODLE.md](MOODLE.md), Abschnitt „Freischalten“). Läuft der Token am Fristabend ab, steht auf der Seite „Abgabe“ zuerst „In Moodle öffnen“. Gib dann in Moodle ab und erneuere den Token danach.
+
 > Der Token hat dieselben Rechte wie dein Moodle-Konto. Nicht in Chats, Issues, PRs oder Dateien einfügen. Bei Verdacht: in Moodle unter *Profil → Einstellungen → Sicherheitsschlüssel* zurücksetzen.
 
 ## 1. Token-Link öffnen
