@@ -7,6 +7,7 @@ import {
   SyncOpSchema,
   SyncServerMessageSchema,
   SyncStreamIdSchema,
+  SyncWelcomeSchema,
   type SyncAck,
   type SyncOp,
   type SyncServerMessage,
@@ -89,6 +90,20 @@ export interface SyncClientOptions {
   leaderLock?: () => LeaderLock | null;
   /** Höchstzeit für den ersten Uhrabgleich; danach wird die Warteschlange trotzdem gesendet */
   clockSyncTimeoutMs?: number;
+}
+
+const WELCOME_KEYS: ReadonlySet<string> = new Set(Object.keys(SyncWelcomeSchema.shape));
+
+/**
+ * Liest das `welcome` nachsichtig (VERTRAEGE §23.4): Unbekannte Schlüssel der obersten Ebene werden vor der Prüfung
+ * entfernt, damit künftige Ergänzungen am `welcome` keinen Tab zum Neuladen zwingen. Kaputte bekannte Felder und
+ * alle anderen Nachrichten bleiben unverändert und fallen weiter durch die strenge Prüfung.
+ */
+function withoutUnknownWelcomeKeys(json: unknown): unknown {
+  if (json === null || typeof json !== 'object' || Array.isArray(json)) return json;
+  const o = json as Record<string, unknown>;
+  if (o.type !== 'welcome') return json;
+  return Object.fromEntries(Object.entries(o).filter(([k]) => WELCOME_KEYS.has(k)));
 }
 
 /** Dieser Tab ist nicht der Sync-Tab (ein anderer Tab hält die Verbindung). */
@@ -857,7 +872,7 @@ export class SyncClient {
     } catch {
       return;
     }
-    const parsed = SyncServerMessageSchema.safeParse(json);
+    const parsed = SyncServerMessageSchema.safeParse(withoutUnknownWelcomeKeys(json));
     if (!parsed.success) {
       await this.handleUnknown(json);
       return;
