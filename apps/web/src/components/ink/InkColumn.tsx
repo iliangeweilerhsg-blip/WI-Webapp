@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Page, PageElement, Stroke, SyncOp } from '@sg/shared';
 import { friendlyMessage } from '../../lib/api.ts';
+import { RETRY_MAX_MS, RETRY_START_MS } from '../../lib/retry.ts';
 import { fetchNotebookPages, fetchPageDetail, fetchPageStrokes, notebookStream } from '../../lib/ink.ts';
 import type { SyncClient } from '../../lib/sync/client.ts';
 import { InkPage } from './InkPage.tsx';
@@ -63,9 +64,8 @@ const PAGE_KINDS = new Set(['page.create', 'page.update', 'page.delete', 'page.r
 const navButton =
   'rounded-md border border-border px-2 py-1 text-sm hover:bg-surface disabled:opacity-40 disabled:hover:bg-transparent';
 
-/** Wartezeit bei Fehlern beim Laden: 1 s, 2 s, 4 s … höchstens 15 s */
-export const RETRY_START_MS = 1_000;
-const RETRY_MAX_MS = 15_000;
+/** Wartezeit bei Fehlern beim Laden: 1 s, 2 s, 4 s … höchstens 15 s (Werte in `lib/retry.ts`) */
+export { RETRY_START_MS };
 
 /** Sammelzeit für Seiten-Operationen, bevor die Seitenliste neu geladen wird */
 const PAGES_DEBOUNCE_MS = 50;

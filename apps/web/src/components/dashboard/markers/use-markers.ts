@@ -130,6 +130,12 @@ function followMarkers(queryClient: QueryClient, sessionId: string, client: Sync
     retryTimer = null;
   };
 
+  const scheduleRetry = () => {
+    clearRetry();
+    retryTimer = setTimeout(() => void establish(), retryDelay);
+    retryDelay = nextRetryDelay(retryDelay);
+  };
+
   const establish = async () => {
     if (running || cancelled) return;
     clearRetry();
@@ -155,10 +161,7 @@ function followMarkers(queryClient: QueryClient, sessionId: string, client: Sync
     } catch {
       needsReload = true;
       // Ist `link` schon `online`, kommt kein Ereignis mehr: selbst mit wachsender Wartezeit wiederholen
-      if (!cancelled) {
-        retryTimer = setTimeout(() => void establish(), retryDelay);
-        retryDelay = nextRetryDelay(retryDelay);
-      }
+      if (!cancelled) scheduleRetry();
     } finally {
       running = false;
     }
@@ -168,12 +171,22 @@ function followMarkers(queryClient: QueryClient, sessionId: string, client: Sync
   // `link` (nicht `connection`): Im Folge-Tab bleibt `connection` bei `other_tab`, `link` zeigt die Mitlese-Verbindung
   // (VERTRAEGE §11.8). Im Leader-Tab sind beide gleich.
   const offLink = client.onEvent('link', (c) => {
-    if (c.state === 'online' && needsReload) void establish();
+    if (c.state !== 'online') return;
+    retryDelay = RETRY_START_MS;
+    if (needsReload) void establish();
+  });
+  // Scheitert der Abgleich nach einem `reset` bei schon stehender Verbindung, kommt kein `link`-Ereignis mehr:
+  // für den eigenen Strom selbst neu aufbauen (wie `InkColumn`)
+  const offResetFailed = client.onEvent('reset.failed', (f) => {
+    if (f.stream !== stream || cancelled) return;
+    needsReload = true;
+    scheduleRetry();
   });
   return () => {
     cancelled = true;
     clearRetry();
     offLink();
+    offResetFailed();
     unsubscribe?.();
     unsubscribe = null;
   };

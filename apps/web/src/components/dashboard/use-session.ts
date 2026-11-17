@@ -68,11 +68,11 @@ export function useSessionData(id: string | null): SessionData {
     const refetch = () => void client.invalidateQueries({ queryKey: key(id) });
     const offUpdated = sync.onEvent('session.updated', apply);
     // Nur nach einem Abbruch neu laden, nicht beim ersten Verbindungsaufbau (der Abruf beim Öffnen ist frisch)
-    const offConnection = watchReconnect(sync, refetch);
+    const offLink = watchReconnect(sync, refetch);
     const offLeader = sync.onEvent('leader.changed', refetch);
     return () => {
       offUpdated();
-      offConnection();
+      offLink();
       offLeader();
     };
   }, [sync, id, apply, client]);

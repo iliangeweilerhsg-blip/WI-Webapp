@@ -121,6 +121,11 @@ function fakeSync(state = 'online') {
     emit: (name: string, data: unknown) => {
       for (const fn of listeners.get(name) ?? []) fn(data);
     },
+    /** Nur die Mitlese-Verbindung eines Folge-Tabs: `connectionState` bleibt unverändert */
+    setLink(next: string) {
+      client.linkState = next;
+      for (const fn of listeners.get('link') ?? []) fn({ state: next });
+    },
     setState(next: string) {
       client.connectionState = next;
       client.linkState = next;
@@ -856,6 +861,18 @@ describe('Heute: ohne Verbindung', () => {
     await waitFor(() => expect(card()).toHaveAttribute('data-state', 'laeuft'));
     expect(core.requests.filter((r) => r.path.startsWith('/sessions?from=')).length).toBeGreaterThan(before);
     expect(screen.queryByText(/Keine Live-Verbindung/)).toBeNull();
+  });
+
+  it('Folge-Tab: bricht die Mitlese-Verbindung ab und wird wieder online (nur link), wird neu geladen', async () => {
+    boot({ syncState: 'other_tab' });
+    await screen.findByRole('button', { name: 'Start' });
+    const count = () => core.requests.filter((r) => r.path.startsWith('/sessions?from=')).length;
+    act(() => sync.setLink('online'));
+    await waitFor(() => expect(count()).toBeGreaterThan(1)); // beim Öffnen stand die Verbindung noch nicht
+    act(() => sync.setLink('backoff'));
+    const before = count();
+    act(() => sync.setLink('online'));
+    await waitFor(() => expect(count()).toBeGreaterThan(before));
   });
 
   it('Start mit anfangs fehlender Verbindung lädt nach dem Verbinden neu', async () => {
