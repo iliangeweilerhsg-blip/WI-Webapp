@@ -52,7 +52,7 @@ let tickConfig: TestApp['config'];
 async function truncate(): Promise<void> {
   await t.handle
     .sql`TRUNCATE semester, module, calendar_source, calendar_event, session, slide_deck, moodle_item,
-    moodle_course_link, job, sync_op, sync_stream, setting CASCADE`;
+    moodle_course_link, moodle_course_decided, job, sync_op, sync_stream, setting CASCADE`;
 }
 
 async function seed(): Promise<void> {
@@ -261,6 +261,7 @@ describe('SessionTickResult und afterTick (17.8)', () => {
     const eventId = await mkEvent(60, 120);
     const id = await mkSession({ state: 'geplant', calendarEventId: eventId });
     const second: DbHandle = createDb(testDatabaseUrl());
+    await second.sql`SELECT 1`; // Verbindung vorwärmen: Sie soll im Aufruf sofort abfragen können
     const seen: { result: SessionTickResult; options: SessionTickOptions; state: Promise<string> }[] = [];
     let clock = T(0);
     const ticker = startSessionTicker({
