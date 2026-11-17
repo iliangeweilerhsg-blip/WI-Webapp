@@ -634,6 +634,103 @@ describe('Mitlese-Verbindung im Folge-Tab (§11.8, Owner-Meldung 17.11.)', () =>
   });
 });
 
+describe('Mitlese-Verbindung: Mutanten (Nacharbeit PR #379)', () => {
+  const uncertainOp = (n: number) => ({
+    type: 'op' as const,
+    op_id: uid(7000 + n),
+    stream: nbStream(1),
+    kind: 'notebook.create',
+    at: 1000,
+    clock_uncertain: true,
+    data: { notebook_id: uid(1), module_id: uid(10), title: 'T', kind: 'frei', created_at: 1 },
+  });
+
+  it('Folge-Tab schreibt die db_epoch auch nach einem Epochen-Reset nicht', async () => {
+    const locks = new FakeLocks();
+    const storeA = new MemoryQueueStore();
+    const storeB = new MemoryQueueStore();
+    await storeB.setMeta('db_epoch', 'alte-epoche');
+    const a = make({ leaderLock: locks.create, store: storeA });
+    const b = make({ leaderLock: locks.create, store: storeB });
+    await a.connect();
+    await settle();
+    const onReset = vi.fn(async () => ({ lastSeq: 0, lastOpId: null }));
+    b.subscribe(nbStream(1), { lastSeq: 0, lastOpId: null }, () => undefined, { onReset });
+    await b.connect();
+    await settle();
+    expect(b.leader).toBe(false);
+    expect(onReset).toHaveBeenCalledWith(expect.objectContaining({ reason: 'db_epoch_changed' }));
+    expect(await storeB.getMeta('db_epoch')).toBe('alte-epoche');
+  });
+
+  it.each([4401, 4426])(
+    'Folge-Tab: Mitlesen endet mit %i, der Tab wird trotzdem später Leader und verbindet sich',
+    async (code) => {
+      const locks = new FakeLocks();
+      const a = make({ leaderLock: locks.create });
+      const b = make({ leaderLock: locks.create });
+      const fatal: unknown[] = [];
+      b.onEvent('fatal', (f) => fatal.push(f));
+      await a.connect();
+      await b.connect();
+      await settle();
+      server.sockets[1]!.serverClose(code);
+      await settle();
+      expect(b.linkState).toBe('failed');
+      expect(b.leader).toBe(false);
+      expect(fatal).toHaveLength(0);
+      a.disconnect();
+      await settle();
+      expect(b.leader).toBe(true);
+      expect(b.connectionState).toBe('online');
+      expect(server.last.of('hello')).toHaveLength(1);
+      await expect(b.send(notebookCreate(2))).resolves.toBeTruthy();
+    },
+  );
+
+  it('Folge-Tab mit Warteschlange und unsicherer Uhr schreibt beim Uhrabgleich nichts in den Speicher', async () => {
+    server.skewMs = 5000;
+    const locks = new FakeLocks();
+    const storeB = new MemoryQueueStore();
+    const entry = await storeB.append(uncertainOp(1) as never);
+    const putMany = vi.spyOn(storeB, 'putMany');
+    const a = make({ leaderLock: locks.create, store: new MemoryQueueStore() });
+    const b = make({ leaderLock: locks.create, store: storeB });
+    await a.connect();
+    await b.connect();
+    await settle();
+    expect(b.leader).toBe(false);
+    expect(b.linkState).toBe('online');
+    expect(server.sockets[1]!.of('time.offset')).toHaveLength(1);
+    expect(b.pendingCount).toBe(1);
+    expect(putMany).not.toHaveBeenCalled();
+    const stored = (await storeB.list())[0]!;
+    expect(stored.key).toBe(entry.key);
+    expect(stored.op).toMatchObject({ at: 1000, clock_uncertain: true });
+    expect(server.sockets[1]!.of('op')).toHaveLength(0);
+  });
+
+  it('Folge-Tab mit Warteschlange: Wartezeit nach dem Verbinden zurückgesetzt (kein Acks im Folge-Tab)', async () => {
+    const locks = new FakeLocks();
+    const storeB = new MemoryQueueStore();
+    await storeB.append(uncertainOp(1) as never);
+    const a = make({ leaderLock: locks.create, store: new MemoryQueueStore() });
+    const b = make({ leaderLock: locks.create, store: storeB });
+    await a.connect();
+    await b.connect();
+    await settle();
+    expect(b.linkState).toBe('online');
+    for (let i = 0; i < 3; i++) {
+      server.last.serverClose(4503);
+      await settle();
+      expect(b.linkState).toBe('backoff');
+      await vi.advanceTimersByTimeAsync(1_000);
+      await settle();
+      expect(b.linkState).toBe('online');
+    }
+  });
+});
+
 describe('Rollenfindung und Schreibschutz', () => {
   it('B-a: send() direkt nach await connect() klappt im einzigen Tab, other_tab blitzt nie auf', async () => {
     const locks = new FakeLocks();

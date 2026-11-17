@@ -36,7 +36,8 @@ const ghost =
  * kommen nach einem Verbindungsabbruch nicht nach (§11.6).
  */
 export function useIpadState(client: SyncClient | null): { paired: boolean; connected: boolean } {
-  // Ohne Live-Verbindung (auch im Folge-Tab) kommen keine Ereignisse: dann alle 30 s nachfragen
+  // Ohne Live-Verbindung kommen keine Ereignisse: dann alle 30 s nachfragen (Rückfallebene; der Folge-Tab liest über
+  // seine Mitlese-Verbindung mit und bekommt sie, siehe §11.8)
   const { online } = useLiveState(client);
   const devices = useDevices({ refetchIntervalMs: online ? false : POLL_MS });
   const queryClient = useQueryClient();

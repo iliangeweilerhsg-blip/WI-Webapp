@@ -1242,7 +1242,8 @@ export class SyncClient {
     if (this.clockTimeout) clearTimeout(this.clockTimeout);
     this.clockTimeout = null;
     this.setState('online');
-    if (this.queue.length === 0) this.backoffAttempt = 0;
+    // Ein Folge-Tab bekommt nie Acks, seine (fremde) Warteschlange leert sich dort nicht: Wartezeit trotzdem zurücksetzen
+    if (this.queue.length === 0 || !this.isLeader) this.backoffAttempt = 0;
     this.pump();
   }
 
