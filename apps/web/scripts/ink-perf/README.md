@@ -60,6 +60,7 @@ echte Mac-GPU zählt Weg 1.
 | `--throttle` | `1` | CPU-Drosselung (nur Chromium); `4` entspricht der Messung in Issue #79 |
 | `--dpr` | `2` | Geräte-Pixel-Verhältnis (Retina) |
 | `--width` | `700` | CSS-Breite der Seite bei Zoom 1 (bei Zoom 2 doppelt) |
+| `--sizes` | v1-Striche | `on`: Striche aus der Strichformat-v2-Datei mit `sizes` (Breite je Punkt), `off`: dieselben Striche ohne `sizes` (v1-Rückfall). Ohne Angabe die v1-Striche der Dateien 01 bis 07 wie bisher |
 | `--json` | aus | Ausgabe als JSON |
 
 ## Was zurückmelden?

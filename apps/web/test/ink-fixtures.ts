@@ -1,4 +1,6 @@
-// Strich-Testdaten aus tests/fixtures/strokes (7 Dateien, 299 Striche).
+// Strich-Testdaten aus tests/fixtures/strokes: 8 Dateien mit 308 Strichen.
+// 01 bis 07 sind Format v1 (ohne `sizes`, 299 Striche), 08 ist Format v2 (mit `sizes`, 9 Striche).
+// Tests, die „v1 unverändert“ prüfen, nehmen `loadV1Fixtures()`, also nur die Dateien 01 bis 07.
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,4 +21,14 @@ export function loadFixtures(): FixtureFile[] {
       name,
       strokes: JSON.parse(readFileSync(join(FIXTURE_DIR, name), 'utf8')) as Stroke[],
     }));
+}
+
+/** Nur die Dateien 01 bis 07 (Format v1, 299 Striche). */
+export function loadV1Fixtures(): FixtureFile[] {
+  return loadFixtures().filter((f) => /^0[1-7]-/.test(f.name));
+}
+
+/** Nur die Datei 08 (Format v2, mit `sizes`). */
+export function loadV2Fixtures(): FixtureFile[] {
+  return loadFixtures().filter((f) => f.name.startsWith('08-'));
 }

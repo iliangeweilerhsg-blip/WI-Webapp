@@ -2,7 +2,9 @@
 /* eslint-disable @typescript-eslint/no-require-imports, no-empty, no-undef -- CommonJS-Messskript (Node + Browser-Kontext) */
 // Frame-Messung für den Ink-Renderer (Issue #79): p95 pro Frame bei Zoom 1 und Zoom 2 mit vielen Strichen.
 // Aufruf: node apps/web/scripts/ink-perf/measure.cjs [--browser chromium|webkit|firefox] [--strokes 1500]
-//         [--serve [--port 8123]] [--frames 120] [--throttle 1] [--dpr 2] [--width 700] [--json]
+//         [--sizes on|off] [--serve [--port 8123]] [--frames 120] [--throttle 1] [--dpr 2] [--width 700] [--json]
+// --sizes: ohne Angabe die Striche im Format v1 (Dateien ohne `sizes`, wie bisher). `on`: Striche der Strichformat-v2-
+//          Dateien mit `sizes`; `off`: dieselben Striche ohne `sizes` (v1-Rückfall, gleiche Geometrie wie `on`).
 // Siehe README.md. Playwright muss vorhanden sein (wird nicht installiert).
 'use strict';
 const fs = require('node:fs');
@@ -21,6 +23,11 @@ const nFrames = Number(opt('frames', 120));
 const throttle = Number(opt('throttle', 1));
 const dpr = Number(opt('dpr', 2));
 const width = Number(opt('width', 700)); // CSS-Breite bei Zoom 1
+const sizesMode = opt('sizes', 'default');
+if (!['default', 'on', 'off'].includes(sizesMode)) {
+  console.error('--sizes erwartet on oder off');
+  process.exit(1);
+}
 const asJson = args.includes('--json');
 const serve = args.includes('--serve');
 const port = Number(opt('port', 8123));
@@ -55,11 +62,21 @@ function loadPlaywright() {
 
 function loadStrokes() {
   const dir = path.join(repoRoot, 'tests/fixtures/strokes');
-  const base = fs
+  const every = fs
     .readdirSync(dir)
     .filter((f) => f.endsWith('.json'))
     .sort()
     .flatMap((f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')));
+  // Ohne --sizes bleibt es bei den v1-Strichen (Dateien 01 bis 07). Die v2-Datei hat nur wenige Striche; sie werden
+  // wie bisher wiederholt und versetzt.
+  const v2 = every.filter((s) => s.sizes !== undefined);
+  const base =
+    sizesMode === 'on'
+      ? v2
+      : sizesMode === 'off'
+        ? v2.map(({ sizes: _sizes, ...rest }) => rest)
+        : every.filter((s) => s.sizes === undefined);
+  if (base.length === 0) throw new Error('keine Striche gefunden (tests/fixtures/strokes)');
   const make = (i) => {
     const s = base[i % base.length];
     const copy = Math.floor(i / base.length);
@@ -172,6 +189,7 @@ async function serveManual(outDir) {
       browser: browserName,
       version,
       strokes: nStrokes,
+      sizes: sizesMode,
       dpr,
       throttle,
       width,
@@ -180,7 +198,7 @@ async function serveManual(outDir) {
     };
     if (asJson) return console.log(JSON.stringify(info, null, 2));
     console.log(
-      `Browser ${browserName} ${version} | ${nStrokes} Striche | DPR ${dpr} | CPU-Drosselung ${throttle}x | Breite ${width}px`,
+      `Browser ${browserName} ${version} | ${nStrokes} Striche${sizesMode === 'default' ? '' : ` (sizes ${sizesMode})`} | DPR ${dpr} | CPU-Drosselung ${throttle}x | Breite ${width}px`,
     );
     console.log('Modus   Zoom  Frames   p50 ms   p95 ms   max ms  Frames>25ms');
     for (const r of results) {

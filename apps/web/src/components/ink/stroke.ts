@@ -92,6 +92,12 @@ export interface DecodedStroke {
   count: number;
   /** Punkte NACH `transform`: x, y, force, azimuth, altitude je Punkt (5 Werte) */
   pts: Float32Array;
+  /**
+   * Durchmesser je Punkt in pt NACH `transform` (`max(width, height) × Maßstab`, 0,1 pt bis `MAX_STROKE_WIDTH`) aus
+   * `sizes` (Strichformat v2, VERTRAEGE §23.8). `null` bei v1 und bei unbrauchbaren `sizes`: Der Strich wird dann
+   * wie v1 gezeichnet.
+   */
+  diam: Float32Array | null;
   bbox: readonly [number, number, number, number];
 }
 
@@ -100,6 +106,38 @@ export const MAX_POINTS = 50_000;
 /** Größte sinnvolle Grundbreite in pt (eine Seite ist 595 pt breit) */
 export const MAX_STROKE_WIDTH = 200;
 const MAX_COORD = 1e6;
+
+/** Kleinster Durchmesser eines v2-Punkts in pt (Größe 0 am auslaufenden Ende wird darauf angehoben) */
+export const MIN_DIAMETER = 0.1;
+
+/**
+ * Dekodiert `sizes` (je Punkt `width`, `height` als Float32 little-endian) zu `max(width, height)` je Punkt, vor
+ * `transform`. `null` bei allem Unbrauchbaren: kein Base64, Länge ≠ Punktzahl × 8 Byte, NaN, unendlich, negativ oder
+ * lauter Nullen (VERTRAEGE §23.2, §23.8). Wirft nie.
+ */
+export function decodeSizes(sizes: unknown, count: number): Float32Array | null {
+  if (typeof sizes !== 'string' || count <= 0) return null;
+  let bin: string;
+  try {
+    bin = atob(sizes);
+  } catch {
+    return null;
+  }
+  if (bin.length !== count * 8) return null;
+  const view = new DataView(new ArrayBuffer(bin.length));
+  for (let i = 0; i < bin.length; i++) view.setUint8(i, bin.charCodeAt(i));
+  const out = new Float32Array(count);
+  let any = false;
+  for (let i = 0; i < count; i++) {
+    const w = view.getFloat32(i * 8, true);
+    const h = view.getFloat32(i * 8 + 4, true);
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w < 0 || h < 0) return null;
+    const m = Math.max(w, h);
+    if (m > 0) any = true;
+    out[i] = m;
+  }
+  return any ? out : null;
+}
 
 /**
  * Dekodiert einen Strich und wendet `transform` an. Wirft bei unbrauchbaren Daten (Länge, NaN/Unendlich,
@@ -126,6 +164,13 @@ export function decodeStroke(stroke: Stroke): DecodedStroke {
         throw new RangeError('Punktwert ist nicht brauchbar');
     }
   }
+  // v2: `sizes` passen oder der Strich wird als v1 gezeichnet (nicht verworfen)
+  const diam = decodeSizes(stroke.sizes, count);
+  if (diam) {
+    const scale = matrixScale(m);
+    for (let i = 0; i < count; i++)
+      diam[i] = Math.min(MAX_STROKE_WIDTH, Math.max(MIN_DIAMETER, diam[i]! * scale));
+  }
   return {
     id: stroke.client_id,
     tool: stroke.tool,
@@ -134,6 +179,7 @@ export function decodeStroke(stroke: Stroke): DecodedStroke {
     width: Math.min(MAX_STROKE_WIDTH, stroke.width * matrixScale(m)),
     count,
     pts,
+    diam,
     bbox: stroke.bbox as unknown as readonly [number, number, number, number],
   };
 }

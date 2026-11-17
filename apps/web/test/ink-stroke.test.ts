@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { PageStrokesSchema, type Stroke } from '@sg/shared';
 import {
   MAX_POINTS,
+  MIN_DIAMETER,
+  decodeSizes,
   MAX_STROKE_WIDTH,
   decodePoints,
   decodeStroke,
@@ -12,7 +14,7 @@ import {
   toPoints,
 } from '../src/components/ink/stroke.ts';
 import { LenientPageStrokesSchema } from '../src/lib/ink.ts';
-import { loadFixtures } from './ink-fixtures.ts';
+import { loadFixtures, loadV1Fixtures } from './ink-fixtures.ts';
 
 const files = loadFixtures();
 const all = files.flatMap((f) => f.strokes);
@@ -235,5 +237,101 @@ describe('PageStrokes nachsichtig lesen', () => {
     );
     expect(LenientPageStrokesSchema.safeParse({ ...envelope }).success).toBe(false);
     expect(LenientPageStrokesSchema.safeParse(null).success).toBe(false);
+  });
+});
+
+describe('Strichformat v2: sizes dekodieren (VERTRAEGE §23.8)', () => {
+  const v2 = files.find((f) => f.name.startsWith('08'))!.strokes;
+  const base = v2[0]!;
+  const f32 = (vals: number[]) => {
+    const b = Buffer.alloc(vals.length * 4);
+    vals.forEach((v, i) => b.writeFloatLE(v, i * 4));
+    return b.toString('base64');
+  };
+  // drei Punkte aus der Strichdatei (24 Byte je Punkt), dazu passende sizes
+  const three = (sizes: string | undefined, extra: Partial<Stroke> = {}) =>
+    ({
+      ...base,
+      points: base.points.slice(0, 96),
+      ...(sizes === undefined ? {} : { sizes }),
+      ...extra,
+    }) as Stroke;
+  const ref = (s: Stroke) => {
+    const f = referenceFloats(s.sizes!);
+    return Array.from({ length: f.length / 2 }, (_, i) => Math.max(f[2 * i]!, f[2 * i + 1]!));
+  };
+
+  it('Dateien 01 bis 07 sind v1 (diam = null), Datei 08 ist v2 mit einem Durchmesser je Punkt', () => {
+    for (const f of loadV1Fixtures()) for (const s of f.strokes) expect(decodeStroke(s).diam).toBeNull();
+    expect(v2.length).toBeGreaterThan(0);
+    for (const s of v2) {
+      expect(s.sizes).toBeTypeOf('string');
+      const d = decodeStroke(s);
+      expect(d.diam).not.toBeNull();
+      expect(d.diam!.length).toBe(d.count);
+    }
+  });
+
+  it('Identität: diam = max(width, height) je Punkt, gegen die Referenz-Dekodierung', () => {
+    for (const s of v2.filter((x) => (x.transform as number[])[0] === 1)) {
+      const d = decodeStroke(s);
+      const r = ref(s);
+      expect(r.length).toBe(d.count);
+      r.forEach((v, i) => expect(d.diam![i], s.client_id).toBeCloseTo(Math.max(v, MIN_DIAMETER), 6));
+    }
+    // width ≠ height: der größere Wert zählt (Strich mit 2 Punkten, Größen 2×2 und 3,5×3)
+    const odd = decodeStroke(v2[v2.length - 1]!);
+    expect(Array.from(odd.diam!)).toEqual([2, 3.5]);
+  });
+
+  it('skalierende transform: diam wird mit dem Maßstab multipliziert (1,5 in Datei 08, 2 selbst gebaut)', () => {
+    const scaled = v2.find((x) => (x.transform as number[])[0] === 1.5)!;
+    const d = decodeStroke(scaled);
+    ref(scaled).forEach((v, i) => expect(d.diam![i]).toBeCloseTo(Math.max(v * 1.5, MIN_DIAMETER), 5));
+    const s = three(f32([1, 1, 2, 2, 3, 3]), { transform: [2, 0, 0, 2, 5, 5] });
+    expect(Array.from(decodeStroke(s).diam!)).toEqual([2, 4, 6]);
+    // Maßstab = Wurzel der Flächenänderung (nicht gleichmäßig: [3,0,0,1] ergibt √3)
+    const t = three(f32([1, 1, 2, 2, 3, 3]), { transform: [3, 0, 0, 1, 0, 0] });
+    expect(decodeStroke(t).diam![2]).toBeCloseTo(3 * Math.sqrt(3), 5);
+  });
+
+  it('Größe 0 wird auf 0,1 pt angehoben, riesige Werte auf MAX_STROKE_WIDTH begrenzt', () => {
+    const d = decodeStroke(three(f32([0, 0, 5, 5, 1e9, 1e9])));
+    expect(Array.from(d.diam!)).toEqual([Math.fround(MIN_DIAMETER), 5, MAX_STROKE_WIDTH]);
+    expect(d.diam![0]).toBeCloseTo(0.1, 6);
+  });
+
+  it('jede Art kaputter sizes ergibt diam = null, der Strich bleibt erhalten (wird als v1 gezeichnet)', () => {
+    const ok = f32([1, 1, 2, 2, 3, 3]);
+    const cases: Record<string, unknown> = {
+      'kein Base64': '!!!!!!!!',
+      leer: '',
+      'zu kurz (2 Punkte)': f32([1, 1, 2, 2]),
+      'zu lang (4 Punkte)': f32([1, 1, 2, 2, 3, 3, 4, 4]),
+      'Länge nicht durch 8 teilbar': ok.slice(0, ok.length - 4),
+      NaN: f32([1, 1, NaN, 2, 3, 3]),
+      '+Unendlich': f32([1, 1, 2, Infinity, 3, 3]),
+      '-Unendlich': f32([1, 1, 2, 2, -Infinity, 3]),
+      negativ: f32([1, 1, 2, -0.5, 3, 3]),
+      'lauter Nullen': f32([0, 0, 0, 0, 0, 0]),
+      null: null,
+      Zahl: 42,
+    };
+    for (const [name, sizes] of Object.entries(cases)) {
+      const s = { ...three(undefined), sizes } as unknown as Stroke;
+      const d = decodeStroke(s);
+      expect(d.diam, name).toBeNull();
+      expect(d.count, name).toBe(3);
+      expect(decodeStrokeCached({ ...s }), name).not.toBeNull();
+    }
+    // ein einzelner Nullwert dagegen ist erlaubt (auslaufende Spitze)
+    expect(decodeStroke(three(f32([0, 0, 0, 0, 3, 1]))).diam).not.toBeNull();
+  });
+
+  it('decodeSizes ist unabhängig prüfbar: Länge und Wertebereich', () => {
+    expect(decodeSizes(f32([1, 2, 3, 4]), 2)).toEqual(new Float32Array([2, 4]));
+    expect(decodeSizes(f32([1, 2, 3, 4]), 3)).toBeNull();
+    expect(decodeSizes(undefined, 2)).toBeNull();
+    expect(decodeSizes(f32([1, 2]), 0)).toBeNull();
   });
 });

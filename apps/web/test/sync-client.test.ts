@@ -687,6 +687,47 @@ describe('Eingehende Operationen', () => {
   });
 });
 
+describe('welcome nachsichtig lesen (VERTRAEGE §23.4)', () => {
+  const welcomeWith = (extra: Record<string, unknown>) =>
+    server.last.push({
+      type: 'welcome',
+      protocol: 1,
+      server_time: Date.now(),
+      server_version: 'fake',
+      db_epoch: server.dbEpoch,
+      device_id: null,
+      resume: [],
+      ...extra,
+    });
+
+  it('nimmt ein welcome mit unbekanntem Schlüssel der obersten Ebene an (kein Neuverbinden)', async () => {
+    const c = make();
+    server.mute = true;
+    void c.connect();
+    await settle();
+    c.subscribe(nbStream(1), { lastSeq: 0, lastOpId: null }, () => undefined);
+    server.mute = false;
+    welcomeWith({ features: ['stroke_sizes'], zukunft: { a: 1 } });
+    await settle();
+    expect(server.last.of('subscribe')).toHaveLength(1);
+    // nach mehr als der Wartezeit auf welcome: keine zweite Verbindung
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(server.sockets).toHaveLength(1);
+  });
+
+  it('ein welcome mit kaputtem bekanntem Feld fällt weiter durch (Neuverbinden nach der Wartezeit)', async () => {
+    const c = make({ welcomeTimeoutMs: 1000 });
+    server.mute = true;
+    void c.connect();
+    await settle();
+    server.mute = false;
+    welcomeWith({ device_id: 5, zukunft: true });
+    await settle();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(server.sockets.length).toBeGreaterThan(1);
+  });
+});
+
 describe('Abos zwischen hello und welcome', () => {
   const welcome = (resume: unknown[] = []) =>
     server.last.push({

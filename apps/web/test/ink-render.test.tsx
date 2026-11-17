@@ -1,24 +1,41 @@
 // Renderer-Smoke-Tests in jsdom mit Canvas-Mock.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from '@testing-library/react';
+import { getStroke } from 'perfect-freehand';
+import { createHash } from 'node:crypto';
 import type { PageElement, Stroke } from '@sg/shared';
 import { InkPage } from '../src/components/ink/InkPage.tsx';
 import {
+  drawStroke,
+  MAX_FILL_PER_SEGMENT,
+  MAX_FILL_PER_STROKE,
   paintScene,
   redrawRegion,
   resetScratchCanvas,
   SCRATCH_KEEP_PX,
+  SHAPE_TUNING,
+  strokeBounds,
   strokeOutline,
+  strokeShape,
   TOOL_STYLES,
+  type StrokeShape,
 } from '../src/components/ink/render.ts';
-import { decodeStroke } from '../src/components/ink/stroke.ts';
+import { decodeStroke, parseColor } from '../src/components/ink/stroke.ts';
 import { installCanvasMock, type CanvasLog } from './canvas-mock.ts';
-import { loadFixtures } from './ink-fixtures.ts';
+import { loadV1Fixtures, loadV2Fixtures } from './ink-fixtures.ts';
+
+// getStroke zählt mit (läuft sonst unverändert), damit sich prüfen lässt, dass v2 ohne perfect-freehand zeichnet
+vi.mock('perfect-freehand', async (importOriginal) => {
+  const m = await importOriginal<typeof import('perfect-freehand')>();
+  return { ...m, getStroke: vi.fn(m.getStroke) };
+});
 
 type PageProps = NonNullable<React.ComponentProps<typeof InkPage>['page']>;
 
-const files = loadFixtures();
+// „v1 unverändert“ gilt für die Dateien 01 bis 07 (299 Striche); Datei 08 ist Format v2 und hat eigene Tests unten
+const files = loadV1Fixtures();
 const all = files.flatMap((f) => f.strokes);
+const v2files = loadV2Fixtures().flatMap((f) => f.strokes);
 const page07 = files.find((f) => f.name.startsWith('07'))!.strokes;
 const marker04 = files.find((f) => f.name.startsWith('04'))!.strokes;
 
@@ -333,5 +350,650 @@ describe('redrawRegion Zwischen-Canvas', () => {
     redrawRegion(ctx, [], { x0: 10, y0: 10, x1: 110, y1: 60 }, 1, size);
     expect(drawn[0]!.width).toBeGreaterThanOrEqual(100);
     expect(drawn[0]!.height).toBeGreaterThanOrEqual(50);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Strichformat v2 (VERTRAEGE §23.8)
+
+describe('v1 bleibt unverändert (Dateien 01 bis 07)', () => {
+  it('Umrisse und Ränder der 299 Striche sind Zeichen für Zeichen die von vor V2-2', () => {
+    // Prüfsumme aus dem Stand VOR V2-2 (gleiche Rundung). Ändert sich der v1-Pfad absichtlich (V2-5), neu bestimmen.
+    const round = (_: string, v: unknown) => (typeof v === 'number' ? Math.round(v * 1e4) / 1e4 : v);
+    const sum = (fn: (d: ReturnType<typeof decodeStroke>) => unknown) => {
+      const h = createHash('sha256');
+      for (const s of all) h.update(JSON.stringify(fn(decodeStroke(s)), round));
+      return h.digest('hex').slice(0, 16);
+    };
+    expect(all).toHaveLength(299);
+    expect(sum(strokeOutline)).toBe('df9560373e8bfa64');
+    expect(sum(strokeBounds)).toBe('9f359413cbf22a04');
+  });
+
+  it('v1-Striche zeichnen über perfect-freehand und quadraticCurveTo, ohne Kreise', () => {
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    const before = vi.mocked(getStroke).mock.calls.length;
+    const fresh = all.slice(0, 20).map((s) => ({ ...s }));
+    for (const s of fresh) drawStroke(ctx, decodeStroke(s));
+    expect(vi.mocked(getStroke).mock.calls.length).toBe(before + 20);
+    expect(log.count('arc')).toBe(0);
+    expect(log.count('quadraticCurveTo')).toBeGreaterThan(20);
+    expect(log.fills).toHaveLength(20);
+  });
+});
+
+describe('Strichformat v2: Form aus dem Durchmesser je Punkt', () => {
+  // Die Form wird hier ohne die Vereinfachung geprüft (eine Scheibe und ein Trapez je Punkt wie in 23.8); die
+  // Vereinfachung hat unten ihre eigenen Tests.
+  const tolerance = SHAPE_TUNING.discTolerance;
+  beforeEach(() => {
+    SHAPE_TUNING.discTolerance = 0;
+  });
+  afterEach(() => {
+    SHAPE_TUNING.discTolerance = tolerance;
+  });
+  const base = files[0]!.strokes[0]!;
+  const id = (n: number) => `019a4e14-0000-7000-8000-${String(n).padStart(12, '0')}`;
+  let nextId = 1000;
+  type P = readonly [number, number, number];
+
+  /** v2-Strich aus (x, y, Durchmesser); width = height = Durchmesser. `sizesOverride` ersetzt die sizes (Rohwerte). */
+  function make(pts: readonly P[], extra: Partial<Stroke> = {}, sizesOverride?: number[]): Stroke {
+    const pb = Buffer.alloc(pts.length * 24);
+    pts.forEach(([x, y], i) => {
+      pb.writeFloatLE(x, i * 24);
+      pb.writeFloatLE(y, i * 24 + 4);
+      pb.writeFloatLE(i, i * 24 + 8);
+      pb.writeFloatLE(0.5, i * 24 + 12);
+    });
+    const raw = sizesOverride ?? pts.flatMap(([, , dd]) => [dd, dd]);
+    const sb = Buffer.alloc(raw.length * 4);
+    raw.forEach((v, i) => sb.writeFloatLE(v, i * 4));
+    return {
+      ...base,
+      client_id: id(nextId++),
+      tool: 'fountain',
+      layer: 'ink',
+      color: '#1E2A44FF',
+      width: 4,
+      transform: [1, 0, 0, 1, 0, 0],
+      points: pb.toString('base64'),
+      sizes: sb.toString('base64'),
+      ...extra,
+    } as Stroke;
+  }
+  const dec = (s: Stroke) => decodeStroke(s);
+  const marker = { tool: 'marker', layer: 'highlight', color: '#FFE06666' } as Partial<Stroke>;
+
+  /** Lotrechter Schnitt durch die Teilflächen bei x: kleinstes und größtes y, das eine Teilfläche deckt */
+  function span(sh: StrokeShape, x: number): [number, number] | null {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let i = 0; i < sh.circles.length; i += 3) {
+      const dx = x - sh.circles[i]!;
+      const r = sh.circles[i + 2]!;
+      if (Math.abs(dx) > r) continue;
+      const h = Math.sqrt(r * r - dx * dx);
+      lo = Math.min(lo, sh.circles[i + 1]! - h);
+      hi = Math.max(hi, sh.circles[i + 1]! + h);
+    }
+    for (let i = 0; i < sh.quads.length; i += 8) {
+      for (let j = 0; j < 4; j++) {
+        const ax = sh.quads[i + j * 2]!;
+        const ay = sh.quads[i + j * 2 + 1]!;
+        const bx = sh.quads[i + ((j + 1) % 4) * 2]!;
+        const by = sh.quads[i + ((j + 1) % 4) * 2 + 1]!;
+        if ((ax - x) * (bx - x) > 0 || ax === bx) continue;
+        const y = ay + ((by - ay) * (x - ax)) / (bx - ax);
+        lo = Math.min(lo, y);
+        hi = Math.max(hi, y);
+      }
+    }
+    return lo <= hi ? [lo, hi] : null;
+  }
+  const widthAt = (sh: StrokeShape, x: number) => {
+    const s = span(sh, x);
+    return s ? s[1] - s[0] : 0;
+  };
+  const area = (q: ArrayLike<number>, o: number) => {
+    let a = 0;
+    for (let j = 0; j < 4; j++) {
+      const k = (j + 1) % 4;
+      a += q[o + j * 2]! * q[o + k * 2 + 1]! - q[o + k * 2]! * q[o + j * 2 + 1]!;
+    }
+    return a;
+  };
+
+  it('1. alle Teilflächen haben positiven Umlaufsinn, Kreise entstehen mit arc(…, false)', () => {
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    // Datei 08, dazu Kurven in beide Drehrichtungen (die Eckenfolge der Trapeze hängt von der Richtung ab)
+    const curves = [
+      make([
+        [0, 0, 2],
+        [10, 5, 6],
+        [20, 0, 3],
+        [10, -5, 5],
+        [0, 0, 2],
+      ]),
+      make([
+        [0, 0, 2],
+        [0, 10, 6],
+        [-10, 10, 3],
+        [-10, 0, 5],
+      ]),
+      make([
+        [0, 0, 6],
+        [-5, 0, 2],
+      ]),
+      make(
+        [
+          [0, 0, 6],
+          [5, 0, 2],
+        ],
+        marker,
+      ),
+      make([[5, 5, 8]], marker),
+    ];
+    for (const s of [...v2files, ...curves]) {
+      const d = dec(s);
+      expect(d.diam, s.client_id).not.toBeNull();
+      const sh = strokeShape(d);
+      expect(sh.circles.length + sh.quads.length).toBeGreaterThan(0);
+      for (let i = 0; i < sh.quads.length; i += 8) expect(area(sh.quads, i), s.client_id).toBeGreaterThan(0);
+      log.reset();
+      drawStroke(ctx, d);
+      for (const c of log.calls.filter((c) => c.name === 'arc')) expect(c.args[5]).toBe(false);
+    }
+  });
+
+  it('2. gerader Strich 100 pt, Durchmesser 2 auf 6: Breite 2, 4, 6 (±0,1) an Anfang, Mitte, Ende', () => {
+    const d = dec(
+      make([
+        [0, 0, 2],
+        [100, 0, 6],
+      ]),
+    );
+    const sh = strokeShape(d);
+    expect(widthAt(sh, 0)).toBeCloseTo(2, 1);
+    expect(widthAt(sh, 50)).toBeCloseTo(4, 1);
+    expect(widthAt(sh, 100)).toBeCloseTo(6, 1);
+    // linear dazwischen, auch weit weg von den Stützpunkten
+    for (const x of [7, 23, 61, 88]) expect(Math.abs(widthAt(sh, x) - (2 + (4 * x) / 100))).toBeLessThan(0.1);
+  });
+
+  it('2. Ecken der Trapeze liegen auf den Kreisen und sind äußere Tangenten (keine Einbuchtung)', () => {
+    // Abstand rund 1 pt, kein Verdichten: Kette = Eingabepunkte; der Durchmesser wächst von 2 auf 8
+    const pts = Array.from({ length: 8 }, (_, i): P => [i, 0.05 * i * i, 2 + (6 * i) / 7]);
+    const sh = strokeShape(dec(make(pts)));
+    expect(sh.filled).toBe(0);
+    expect(sh.circles).toHaveLength(24);
+    expect(sh.quads).toHaveLength(56);
+    for (let q = 0; q < 7; q++) {
+      const [x0, y0, r0] = Array.from(sh.circles.slice(q * 3, q * 3 + 3)) as [number, number, number];
+      const [x1, y1, r1] = Array.from(sh.circles.slice(q * 3 + 3, q * 3 + 6)) as [number, number, number];
+      const c = Array.from(
+        { length: 4 },
+        (_, k) => [sh.quads[q * 8 + k * 2]!, sh.quads[q * 8 + k * 2 + 1]!] as const,
+      );
+      const dist = (p: readonly [number, number], x: number, y: number) => Math.hypot(p[0] - x, p[1] - y);
+      const on0 = [0, 1, 2, 3].filter((k) => Math.abs(dist(c[k]!, x0, y0) - r0) < 1e-9);
+      const on1 = [0, 1, 2, 3].filter((k) => Math.abs(dist(c[k]!, x1, y1) - r1) < 1e-9);
+      expect(on0, `Trapez ${q}`).toHaveLength(2);
+      expect(on1, `Trapez ${q}`).toHaveLength(2);
+      // Tangente: Die Seite von einer Ecke auf Kreis 0 zur Ecke auf Kreis 1 steht senkrecht auf dem Radius zur Ecke.
+      // Bei einem Versatz entlang der Normalen des Abschnitts wäre das bei wechselndem Radius nicht der Fall.
+      for (const a of on0) {
+        const b = on1.find((k) => (k - a + 4) % 4 === 1 || (a - k + 4) % 4 === 1)!;
+        const side = [c[b]![0] - c[a]![0], c[b]![1] - c[a]![1]] as const;
+        const radius = [c[a]![0] - x0, c[a]![1] - y0] as const;
+        expect(Math.abs(side[0] * radius[0] + side[1] * radius[1])).toBeLessThan(1e-9);
+        const radius1 = [c[b]![0] - x1, c[b]![1] - y1] as const;
+        expect(Math.abs(side[0] * radius1[0] + side[1] * radius1[1])).toBeLessThan(1e-9);
+      }
+    }
+  });
+
+  it('3. Spitzkehre (180°): kein Fehler, die Form deckt den Wendepunkt', () => {
+    const d = dec(
+      make([
+        [0, 0, 4],
+        [50, 0, 8],
+        [10, 0, 3],
+      ]),
+    );
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    expect(() => drawStroke(ctx, d)).not.toThrow();
+    const sh = strokeShape(d);
+    for (const v of [...sh.circles, ...sh.quads]) expect(Number.isFinite(v)).toBe(true);
+    const turn = span(sh, 50)!;
+    expect(turn[1] - turn[0]).toBeGreaterThanOrEqual(8 - 1e-6);
+    expect(span(sh, 53.9)).not.toBeNull(); // Kappe über den Wendepunkt hinaus (Radius 4)
+    expect(span(sh, 54.1)).toBeNull();
+  });
+
+  it('4. ein Punkt ergibt einen Kreis, beim Textmarker ein Quadrat mit der Kantenlänge des Durchmessers', () => {
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    log.reset();
+    drawStroke(ctx, dec(make([[20, 30, 6]])));
+    expect(log.count('arc')).toBe(1);
+    expect(log.calls.find((c) => c.name === 'arc')!.args.slice(0, 3)).toEqual([20, 30, 3]);
+    expect(log.fills).toHaveLength(1);
+
+    const mk = dec(make([[20, 30, 6]], marker));
+    log.reset();
+    drawStroke(ctx, mk);
+    expect(log.count('arc')).toBe(0);
+    expect(log.count('lineTo')).toBe(3);
+    const sh = strokeShape(mk);
+    expect(sh.quads).toHaveLength(8);
+    const xs = [0, 2, 4, 6].map((i) => sh.quads[i]!);
+    const ys = [1, 3, 5, 7].map((i) => sh.quads[i]!);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(6, 9);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(6, 9);
+    expect(area(sh.quads, 0)).toBeGreaterThan(0);
+    // Punkte unter 0,01 pt Abstand werden zu einem; der größere Durchmesser gewinnt
+    const merged = strokeShape(
+      dec(
+        make([
+          [1, 1, 2],
+          [1.001, 1, 5],
+          [1, 1.002, 3],
+        ]),
+      ),
+    );
+    expect(merged.chainLength).toBe(1);
+    expect(merged.circles[2]).toBe(2.5);
+  });
+
+  it('5. Textmarker: stumpfe Enden, also keine Scheibe am ersten und letzten Punkt', () => {
+    const sh = strokeShape(
+      dec(
+        make(
+          [
+            [0, 0, 10],
+            [100, 0, 10],
+          ],
+          marker,
+        ),
+      ),
+    );
+    expect(span(sh, -0.5)).toBeNull();
+    expect(span(sh, 100.5)).toBeNull();
+    expect(widthAt(sh, 0.01)).toBeCloseTo(10, 1);
+    expect(widthAt(sh, 99.99)).toBeCloseTo(10, 1);
+    // Innen tragen die Zwischenpunkte Scheiben, aber keine ragt über die Schnittkante an den Enden hinaus
+    expect(sh.circles.length / 3).toBeGreaterThan(40);
+    expect(sh.circles.length / 3).toBeLessThan(sh.chainLength - 2);
+    for (let i = 0; i < sh.circles.length; i += 3) {
+      expect(sh.circles[i]! - sh.circles[i + 2]!).toBeGreaterThanOrEqual(-1e-9);
+      expect(sh.circles[i]! + sh.circles[i + 2]!).toBeLessThanOrEqual(100 + 1e-9);
+    }
+    // derselbe Strich als Füller bekommt runde Enden
+    const pen = strokeShape(
+      dec(
+        make([
+          [0, 0, 10],
+          [100, 0, 10],
+        ]),
+      ),
+    );
+    expect(span(pen, -4.9)).not.toBeNull();
+    expect(pen.circles.length / 3).toBe(pen.chainLength);
+  });
+
+  it('6. Größe 0 am Ende: kein Fehler, endliche Form, die Spitze läuft aus', () => {
+    const d = dec(
+      make([
+        [0, 0, 6],
+        [10, 0, 3],
+        [20, 0, 0],
+      ]),
+    );
+    expect(d.diam![2]).toBeCloseTo(0.1, 6);
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    expect(() => drawStroke(ctx, d)).not.toThrow();
+    const sh = strokeShape(d);
+    expect(widthAt(sh, 19.9)).toBeLessThan(0.5);
+    for (const v of [...sh.circles, ...sh.quads]) expect(Number.isFinite(v)).toBe(true);
+    // Kreis liegt im Kreis: kein Trapez, kein Fehler
+    const inner = strokeShape(
+      dec(
+        make([
+          [0, 0, 20],
+          [1, 0, 2],
+        ]),
+      ),
+    );
+    expect(inner.quads).toHaveLength(0);
+    expect(inner.circles).toHaveLength(6);
+  });
+
+  it('7. vor jedem arc steht ein moveTo auf den Startpunkt des Kreises, danach closePath', () => {
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    for (const s of v2files) {
+      log.reset();
+      drawStroke(ctx, dec(s));
+      const calls = log.calls;
+      const arcs = calls.map((c, i) => [c, i] as const).filter(([c]) => c.name === 'arc');
+      expect(arcs.length, s.client_id).toBeGreaterThan(0);
+      for (const [c, i] of arcs) {
+        const [x, y, r] = c.args as [number, number, number];
+        expect(calls[i - 1]!.name).toBe('moveTo');
+        expect(calls[i - 1]!.args).toEqual([x + r, y]);
+        expect(calls[i + 1]!.name).toBe('closePath');
+      }
+    }
+  });
+
+  it('8. Verdichten ist begrenzt: höchstens 64 Zwischenpunkte je Abschnitt und 5 000 je Strich', () => {
+    const far = strokeShape(
+      dec(
+        make([
+          [0, 0, 4],
+          [100_000, 0, 4],
+        ]),
+      ),
+    );
+    expect(far.filled).toBe(MAX_FILL_PER_SEGMENT);
+    expect(far.chainLength).toBe(2 + MAX_FILL_PER_SEGMENT);
+    // 1 000 lange Abschnitte: je 64 wären 64 000; die Summe wird auf höchstens 5 000 verkleinert
+    const long = strokeShape(
+      dec(make(Array.from({ length: 1001 }, (_, i): P => [i * 100, (i % 2) * 50, 3]))),
+    );
+    expect(long.filled).toBeGreaterThan(0);
+    expect(long.filled).toBeLessThanOrEqual(MAX_FILL_PER_STROKE);
+    expect(long.chainLength).toBe(1001 + long.filled);
+    // kurze Abschnitte: k = ceil(Länge / 1,5) − 1
+    expect(
+      strokeShape(
+        dec(
+          make([
+            [0, 0, 2],
+            [10, 0, 2],
+          ]),
+        ),
+      ).filled,
+    ).toBe(Math.ceil(10 / 1.5) - 1);
+    // bei mehr als 5 000 Punkten entfällt das Verdichten ganz
+    const many = strokeShape(dec(make(Array.from({ length: 5001 }, (_, i): P => [i * 10, 0, 2]))));
+    expect(many.filled).toBe(0);
+    expect(many.chainLength).toBe(5001);
+  });
+
+  it('ein fill() je Strich mit nonzero, perfect-freehand läuft für v2 nicht', () => {
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    const before = vi.mocked(getStroke).mock.calls.length;
+    for (const s of v2files) drawStroke(ctx, dec(s));
+    expect(vi.mocked(getStroke).mock.calls.length).toBe(before);
+    expect(log.fills).toHaveLength(v2files.length);
+    expect(log.count('beginPath')).toBe(v2files.length);
+    expect(log.calls.filter((c) => c.name === 'fill').every((c) => c.args[0] === 'nonzero')).toBe(true);
+    // alle Werkzeuge zeichnen v2, auch Bleistift mit seiner Deckkraft (ToolStyle.alpha)
+    expect(new Set(v2files.map((s) => s.tool))).toEqual(new Set(['fountain', 'pen', 'pencil', 'marker']));
+    const pencil = v2files.find((s) => s.tool === 'pencil')!;
+    const alpha = Number(/, ([\d.]+)\)$/.exec(log.fills[v2files.indexOf(pencil)]!)![1]);
+    expect(alpha).toBeCloseTo(parseColor(pencil.color).a * TOOL_STYLES.pencil.alpha, 3);
+  });
+
+  it('kaputte sizes: der Strich wird als v1 gezeichnet (perfect-freehand, keine Kreise)', () => {
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    const pts: P[] = [
+      [0, 0, 4],
+      [10, 5, 4],
+      [20, 0, 4],
+    ];
+    const broken = [
+      make(pts, {}, [1, 1, 2, 2]), // zu kurz
+      make(pts, {}, [0, 0, 0, 0, 0, 0]), // lauter Nullen
+      make(pts, {}, [1, 1, NaN, 1, 1, 1]),
+      make(pts, {}, [1, 1, -1, 1, 1, 1]),
+      make(pts, { sizes: '!!!!' }),
+    ];
+    const before = vi.mocked(getStroke).mock.calls.length;
+    for (const s of broken) {
+      const d = dec(s);
+      expect(d.diam).toBeNull();
+      log.reset();
+      drawStroke(ctx, d);
+      expect(log.count('arc')).toBe(0);
+      expect(log.count('quadraticCurveTo')).toBeGreaterThan(2);
+      expect(log.fills).toHaveLength(1);
+    }
+    expect(vi.mocked(getStroke).mock.calls.length).toBe(before + broken.length);
+  });
+
+  it('strokeBounds schließt die dickste Stelle ein, auch wenn die Kurve über die Eingabepunkte hinausschwingt', () => {
+    // width im Strich bewusst klein: ein v1-Rand (width-abhängig) würde die dicke Stelle abschneiden
+    const d = dec(
+      make(
+        [
+          [100, 100, 2],
+          [100, 101, 60],
+          [100, 102, 2],
+        ],
+        { width: 1 },
+      ),
+    );
+    const r = strokeBounds(d);
+    expect(r.x0).toBeLessThanOrEqual(100 - 30);
+    expect(r.x1).toBeGreaterThanOrEqual(100 + 30);
+    expect(r.y0).toBeLessThanOrEqual(101 - 30);
+    expect(r.y1).toBeGreaterThanOrEqual(101 + 30);
+    const inside = (dd: ReturnType<typeof decodeStroke>) => {
+      const b = strokeBounds(dd);
+      const sh = strokeShape(dd);
+      for (let i = 0; i < sh.circles.length; i += 3) {
+        const [x, y, rr] = [sh.circles[i]!, sh.circles[i + 1]!, sh.circles[i + 2]!];
+        expect(x - rr).toBeGreaterThanOrEqual(b.x0);
+        expect(x + rr).toBeLessThanOrEqual(b.x1);
+        expect(y - rr).toBeGreaterThanOrEqual(b.y0);
+        expect(y + rr).toBeLessThanOrEqual(b.y1);
+      }
+      for (let i = 0; i < sh.quads.length; i += 2) {
+        expect(sh.quads[i]!).toBeGreaterThanOrEqual(b.x0);
+        expect(sh.quads[i]!).toBeLessThanOrEqual(b.x1);
+        expect(sh.quads[i + 1]!).toBeGreaterThanOrEqual(b.y0);
+        expect(sh.quads[i + 1]!).toBeLessThanOrEqual(b.y1);
+      }
+    };
+    for (const s of v2files) inside(dec(s));
+    inside(
+      dec(
+        make([
+          [0, 0, 4],
+          [1000, 0, 4],
+          [1000, 10, 4],
+          [0, 10, 4],
+          [0, 0, 4],
+        ]),
+      ),
+    );
+  });
+
+  it('redrawRegion lässt keine Reste eines v2-Strichs stehen: ein Ausschnitt an der dicken Stelle zeichnet ihn neu', () => {
+    resetScratchCanvas();
+    const thick = dec(
+      make(
+        [
+          [100, 100, 2],
+          [100, 101, 60],
+          [100, 102, 2],
+        ],
+        { width: 1 },
+      ),
+    );
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    // Ausschnitt nur im äußeren Rand der dicken Stelle (x 72 bis 80), weit weg von den Punkten bei x = 100
+    log.reset();
+    redrawRegion(ctx, [thick], { x0: 72, y0: 90, x1: 80, y1: 110 }, 1, { width: 400, height: 400 });
+    expect(log.fills).toHaveLength(1);
+    // ein Strich ganz außerhalb wird nicht gezeichnet
+    log.reset();
+    redrawRegion(ctx, [thick], { x0: 200, y0: 200, x1: 220, y1: 220 }, 1, { width: 400, height: 400 });
+    expect(log.fills).toHaveLength(0);
+  });
+
+  it('Zeit, Stufe 1: 300 v2-Striche bauen ihre Pfade und zeichnen aus dem Cache im Zeitrahmen', () => {
+    // Misst NUR das Bauen der Pfade (Dekodieren, Formen, Befehle an den Canvas-Mock), nicht das Füllen im Browser.
+    // Die echte Messung steht in apps/web/scripts/ink-perf (measure.cjs --sizes on, VERTRAEGE §23.9, Stufe 2).
+    const strokes: Stroke[] = Array.from(
+      { length: 300 },
+      (_, i) =>
+        ({
+          ...v2files[i % v2files.length]!,
+          client_id: id(5000 + i),
+          transform: [1, 0, 0, 1, (i * 37) % 300, (i * 53) % 500],
+        }) as Stroke,
+    );
+    const { rerender } = render(<InkPage strokes={[]} width={600} />);
+    const t0 = performance.now();
+    rerender(<InkPage strokes={strokes} width={600} />); // dekodiert, baut die Formen, zeichnet
+    const cold = performance.now() - t0;
+    expect(log.fills.length).toBeGreaterThanOrEqual(300);
+    log.reset();
+    const t1 = performance.now();
+    rerender(<InkPage strokes={[...strokes]} width={601} />); // Größenwechsel: alles neu, Formen aus dem Cache
+    const warm = performance.now() - t1;
+    expect(log.fills).toHaveLength(300);
+    expect(log.count('arc')).toBeGreaterThan(300);
+    expect(warm).toBeLessThan(250);
+    expect(cold).toBeLessThan(1500);
+  });
+});
+
+describe('Strichformat v2: überflüssige Scheiben und Zwischenpunkte entfallen (Toleranz 0,02 pt)', () => {
+  const id = (n: number) => `019a4e14-0000-7000-8000-${String(n).padStart(12, '0')}`;
+  const base = files[0]!.strokes[0]!;
+  const make = (pts: readonly (readonly [number, number, number])[], extra: Partial<Stroke> = {}): Stroke => {
+    const pb = Buffer.alloc(pts.length * 24);
+    const sb = Buffer.alloc(pts.length * 8);
+    pts.forEach(([x, y, dd], i) => {
+      pb.writeFloatLE(x, i * 24);
+      pb.writeFloatLE(y, i * 24 + 4);
+      pb.writeFloatLE(i, i * 24 + 8);
+      pb.writeFloatLE(0.5, i * 24 + 12);
+      sb.writeFloatLE(dd, i * 8);
+      sb.writeFloatLE(dd, i * 8 + 4);
+    });
+    return {
+      ...base,
+      client_id: id(9000 + Math.floor(Math.random() * 1e6)),
+      tool: 'fountain',
+      width: 4,
+      transform: [1, 0, 0, 1, 0, 0],
+      points: pb.toString('base64'),
+      sizes: sb.toString('base64'),
+      ...extra,
+    } as Stroke;
+  };
+  const withTolerance = (tol: number, s: Stroke) => {
+    const old = SHAPE_TUNING.discTolerance;
+    SHAPE_TUNING.discTolerance = tol;
+    try {
+      return strokeShape(decodeStroke({ ...s }));
+    } finally {
+      SHAPE_TUNING.discTolerance = old;
+    }
+  };
+  /** Liegt (x, y) in der Form, wenn man sie ringsum um `margin` pt aufdickt (negativ: verkleinert)? */
+  const inside = (sh: StrokeShape, x: number, y: number, margin = 0) => {
+    for (let i = 0; i < sh.circles.length; i += 3)
+      if (Math.hypot(x - sh.circles[i]!, y - sh.circles[i + 1]!) <= sh.circles[i + 2]! + margin) return true;
+    for (let i = 0; i < sh.quads.length; i += 8) {
+      let all = true;
+      for (let j = 0; j < 4 && all; j++) {
+        const k = (j + 1) % 4;
+        const ax = sh.quads[i + j * 2]!;
+        const ay = sh.quads[i + j * 2 + 1]!;
+        const ex = sh.quads[i + k * 2]! - ax;
+        const ey = sh.quads[i + k * 2 + 1]! - ay;
+        // alle Teilflächen laufen positiv, also liegt der Punkt links jeder Kante; cross / Kantenlänge = Abstand
+        all = ex * (y - ay) - ey * (x - ax) >= -margin * Math.hypot(ex, ey);
+      }
+      if (all) return true;
+    }
+    return false;
+  };
+
+  it('eine gerade Kette wird zu einem Trapez mit zwei Kappen, dieselbe Fläche (±0,06 pt) wie ohne Vereinfachung', () => {
+    const s = make([
+      [0, 0, 2],
+      [100, 0, 6],
+    ]);
+    const lit = withTolerance(0, s);
+    const sim = withTolerance(0.02, s);
+    expect(lit.chainLength).toBe(66);
+    // Nach 48 Punkten (Reichweite des Zusammenfassens) beginnt ein neues Stück: 66 Punkte werden zu 3
+    expect(sim.simplified).toBe(3);
+    expect(sim.quads).toHaveLength(16);
+    for (let x = -1; x <= 103; x += 0.7)
+      for (let y = -4; y <= 4; y += 0.31) {
+        if (inside(lit, x, y)) expect(inside(sim, x, y, 0.06), `${x}/${y}`).toBe(true);
+        if (inside(sim, x, y)) expect(inside(lit, x, y, 0.06), `${x}/${y}`).toBe(true);
+      }
+  });
+
+  it('Umkehr und Knicke bleiben erhalten (Spitzkehre, rechter Winkel)', () => {
+    expect(
+      withTolerance(
+        0.02,
+        make([
+          [0, 0, 4],
+          [50, 0, 4],
+          [10, 0, 4],
+        ]),
+      ).simplified,
+    ).toBe(3);
+    // Die Kurve durch den Knick wird gerundet, bleibt aber eine Kurve: ihre Punkte entfallen nicht alle
+    const corner = withTolerance(
+      0.02,
+      make([
+        [0, 0, 4],
+        [30, 0, 4],
+        [30, 30, 4],
+      ]),
+    );
+    expect(corner.simplified).toBeGreaterThan(5);
+    expect(corner.simplified).toBeLessThan(corner.chainLength);
+  });
+
+  it('Datei 08: die vereinfachte Form deckt (fast) dieselben Punkte wie die ausführliche', () => {
+    for (const s of v2files) {
+      const lit = withTolerance(0, s);
+      const sim = withTolerance(0.02, s);
+      expect(sim.simplified, s.client_id).toBeLessThanOrEqual(lit.chainLength);
+      const b = {
+        x0: lit.center.x0 - 8,
+        x1: lit.center.x1 + 8,
+        y0: lit.center.y0 - 8,
+        y1: lit.center.y1 + 8,
+      };
+      let covered = 0;
+      let outside = 0;
+      for (let x = b.x0; x <= b.x1; x += 0.7)
+        for (let y = b.y0; y <= b.y1; y += 0.7) {
+          const a = inside(lit, x, y);
+          const c = inside(sim, x, y);
+          if (a) covered++;
+          // Jede Abweichung liegt in einem Rand von höchstens 0,06 pt (Toleranz 0,02 für Lage, 0,04 für den Radius)
+          if (a && !inside(sim, x, y, 0.06)) outside++;
+          if (c && !inside(lit, x, y, 0.06)) outside++;
+        }
+      expect(covered).toBeGreaterThan(0);
+      expect(outside, s.client_id).toBe(0);
+    }
+  });
+
+  it('weniger Teilpfade als Punkte (das senkt die Füllzeit im Browser)', () => {
+    const total = v2files.reduce((sum, s) => {
+      const lit = withTolerance(0, s);
+      const sim = withTolerance(0.02, s);
+      return (
+        sum +
+        (lit.circles.length / 3 + lit.quads.length / 8) -
+        (sim.circles.length / 3 + sim.quads.length / 8)
+      );
+    }, 0);
+    expect(total).toBeGreaterThan(100);
   });
 });

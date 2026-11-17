@@ -139,8 +139,308 @@ function rgba(c: { r: number; g: number; b: number }, a: number): string {
   return `rgba(${c.r}, ${c.g}, ${c.b}, ${Math.round(a * 1000) / 1000})`;
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// Strichformat v2 (VERTRAEGE §23.8): Form direkt aus dem Durchmesser je Punkt, für alle Werkzeuge, ohne perfect-freehand.
+
+/** Abschnitte über dieser Länge (pt) werden verdichtet; Punkte unter 0,01 pt Abstand werden zusammengefasst */
+const DENSIFY_STEP = 1.5;
+const MERGE_DIST = 0.01;
+/** Zwischenpunkte je Abschnitt und je Strich (sonst ergäben große Koordinatensprünge Hunderttausende Punkte) */
+export const MAX_FILL_PER_SEGMENT = 64;
+export const MAX_FILL_PER_STROKE = 5000;
+
+/** Teilflächen eines v2-Strichs, alle mit positivem Umlaufsinn (Summe x_i·y_{i+1} − x_{i+1}·y_i > 0) */
+export interface StrokeShape {
+  /** Scheiben: x, y, r je Kreis */
+  circles: Float64Array;
+  /** Vierecke: 8 Werte (x0, y0 … x3, y3) je Viereck */
+  quads: Float64Array;
+  /** Punkte der Kette nach Zusammenfassen und Verdichten (ohne Rücksicht auf weggelassene Enden) */
+  chainLength: number;
+  /** Zwischenpunkte, die das Verdichten eingefügt hat */
+  filled: number;
+  /** Punkte der Kette nach dem Weglassen überflüssiger Zwischenpunkte (so viele Scheiben und Trapeze höchstens) */
+  simplified: number;
+  /** Umschließendes Rechteck der Mittelpunkte der Kette (inkl. verdichteter Punkte) */
+  center: Rect;
+  /** Größter Durchmesser der Kette */
+  maxDiam: number;
+}
+
+/** `discTolerance`: größte Abweichung in pt, bei der eine Scheibe an einer fast geraden Stelle entfallen darf (0 = nie) */
+export const SHAPE_TUNING = { discTolerance: 0.02 };
+
+const shapes = new WeakMap<DecodedStroke, StrokeShape>();
+
+/** Weiter als so viele Punkte fasst `simplifyChain` nicht zusammen (hält die Laufzeit linear) */
+const SIMPLIFY_REACH = 48;
+
+/**
+ * Entfernt Zwischenpunkte (in place), die höchstens `tol` pt von der Geraden zwischen ihren Nachbarn abweichen und deren
+ * Durchmesser dort höchstens `2 × tol` vom linearen Verlauf abweicht. Der erste und der letzte Punkt bleiben.
+ * Eine Umkehr (Spitzkehre) fasst es nie zusammen.
+ */
+function simplifyChain(x: number[], y: number[], dd: number[], tol: number): void {
+  const n = x.length;
+  const keep: number[] = [0];
+  let a = 0;
+  while (a < n - 1) {
+    let best = a + 1;
+    for (let b = a + 2; b < n && b <= a + SIMPLIFY_REACH; b++) {
+      const ex = x[b]! - x[a]!;
+      const ey = y[b]! - y[a]!;
+      const len2 = ex * ex + ey * ey;
+      let ok = len2 > 0;
+      for (let j = a + 1; ok && j < b; j++) {
+        const t = ((x[j]! - x[a]!) * ex + (y[j]! - y[a]!) * ey) / len2;
+        const off = Math.abs((x[j]! - x[a]!) * ey - (y[j]! - y[a]!) * ex) / Math.sqrt(len2);
+        ok = t >= 0 && t <= 1 && off <= tol && Math.abs(dd[j]! - (dd[a]! + t * (dd[b]! - dd[a]!))) <= 2 * tol;
+      }
+      if (!ok) break;
+      best = b;
+    }
+    keep.push(best);
+    a = best;
+  }
+  keep.forEach((i, k) => {
+    x[k] = x[i]!;
+    y[k] = y[i]!;
+    dd[k] = dd[i]!;
+  });
+  x.length = y.length = dd.length = keep.length;
+}
+
+/** Zusammenfassen, Verdichten, Scheiben und Trapeze eines v2-Strichs. Je Strich einmal berechnet. */
+export function strokeShape(d: DecodedStroke): StrokeShape {
+  let sh = shapes.get(d);
+  if (sh) return sh;
+  const diam = d.diam!;
+  // 1. Punkte zusammenfassen (größerer Durchmesser gewinnt)
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const ds: number[] = [];
+  for (let i = 0; i < d.count; i++) {
+    const x = d.pts[i * DECODED_STRIDE]!;
+    const y = d.pts[i * DECODED_STRIDE + 1]!;
+    const n = xs.length;
+    if (n > 0 && Math.hypot(x - xs[n - 1]!, y - ys[n - 1]!) < MERGE_DIST) {
+      if (diam[i]! > ds[n - 1]!) ds[n - 1] = diam[i]!;
+    } else {
+      xs.push(x);
+      ys.push(y);
+      ds.push(diam[i]!);
+    }
+  }
+  // 2. Verdichten: Catmull-Rom durch die Nachbarpunkte, Durchmesser linear
+  const n0 = xs.length;
+  const ks = new Array<number>(Math.max(0, n0 - 1)).fill(0);
+  let total = 0;
+  if (n0 <= MAX_FILL_PER_STROKE) {
+    for (let i = 0; i + 1 < n0; i++) {
+      const len = Math.hypot(xs[i + 1]! - xs[i]!, ys[i + 1]! - ys[i]!);
+      if (len > DENSIFY_STEP) {
+        ks[i] = Math.min(MAX_FILL_PER_SEGMENT, Math.ceil(len / DENSIFY_STEP) - 1);
+        total += ks[i]!;
+      }
+    }
+    if (total > MAX_FILL_PER_STROKE) {
+      const f = MAX_FILL_PER_STROKE / total;
+      total = 0;
+      for (let i = 0; i < ks.length; i++) {
+        ks[i] = Math.floor(ks[i]! * f);
+        total += ks[i]!;
+      }
+    }
+  }
+  const cx: number[] = [];
+  const cy: number[] = [];
+  const cd: number[] = [];
+  for (let i = 0; i < n0; i++) {
+    cx.push(xs[i]!);
+    cy.push(ys[i]!);
+    cd.push(ds[i]!);
+    const k = i + 1 < n0 ? ks[i]! : 0;
+    if (k === 0) continue;
+    // Am Rand der Kette gibt es keinen Nachbarn: gespiegelter Hilfspunkt, damit ein einzelner Abschnitt gerade bleibt
+    // und die Zwischenpunkte gleichmäßig liegen
+    const [ax, ay] = i > 0 ? [xs[i - 1]!, ys[i - 1]!] : [2 * xs[0]! - xs[1]!, 2 * ys[0]! - ys[1]!];
+    const [bx, by] =
+      i + 2 < n0 ? [xs[i + 2]!, ys[i + 2]!] : [2 * xs[n0 - 1]! - xs[n0 - 2]!, 2 * ys[n0 - 1]! - ys[n0 - 2]!];
+    for (let j = 1; j <= k; j++) {
+      const t = j / (k + 1);
+      const t2 = t * t;
+      const t3 = t2 * t;
+      const w0 = -0.5 * t3 + t2 - 0.5 * t;
+      const w1 = 1.5 * t3 - 2.5 * t2 + 1;
+      const w2 = -1.5 * t3 + 2 * t2 + 0.5 * t;
+      const w3 = 0.5 * t3 - 0.5 * t2;
+      cx.push(w0 * ax + w1 * xs[i]! + w2 * xs[i + 1]! + w3 * bx);
+      cy.push(w0 * ay + w1 * ys[i]! + w2 * ys[i + 1]! + w3 * by);
+      cd.push(ds[i]! + (ds[i + 1]! - ds[i]!) * t);
+    }
+  }
+  const dense = cx.length;
+  // Fast gerade, gleichmäßig dicker werdende Stücke der verdichteten Kette tragen dieselbe Fläche wie ein einziges
+  // Trapez zwischen ihren Enden (der Durchmesser ist entlang der Geraden linear, die Tangenten sind dieselben). Solche
+  // Zwischenpunkte lässt der Renderer weg, solange die Abweichung unter `discTolerance` bleibt.
+  if (SHAPE_TUNING.discTolerance > 0 && dense > 2) simplifyChain(cx, cy, cd, SHAPE_TUNING.discTolerance);
+  const n = cx.length;
+  const cap = styleOf(d).cap;
+  // 4. Trapeze über die äußeren Tangenten; liegt ein Kreis im anderen, entfällt das Trapez
+  const quads: number[] = [];
+  const hasQuad: boolean[] = [];
+  // Einheitsnormalen der beiden Tangenten je Abschnitt (zeigen von der Kette weg), für die Prüfung der Scheiben unten
+  const tanA: number[][] = [];
+  const tanB: number[][] = [];
+  for (let i = 0; i + 1 < n; i++) {
+    const dx = cx[i + 1]! - cx[i]!;
+    const dy = cy[i + 1]! - cy[i]!;
+    const dist = Math.hypot(dx, dy);
+    const r0 = cd[i]! / 2;
+    const r1 = cd[i + 1]! / 2;
+    if (!(dist > Math.abs(r0 - r1))) {
+      hasQuad.push(false);
+      tanA.push([]);
+      tanB.push([]);
+      continue;
+    }
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const nx = -uy;
+    const ny = ux;
+    const s = (r0 - r1) / dist;
+    const c = Math.sqrt(Math.max(0, 1 - s * s));
+    const ax = s * ux + c * nx;
+    const ay = s * uy + c * ny;
+    const bx = s * ux - c * nx;
+    const by = s * uy - c * ny;
+    const q = [
+      cx[i]! + r0 * ax,
+      cy[i]! + r0 * ay,
+      cx[i + 1]! + r1 * ax,
+      cy[i + 1]! + r1 * ay,
+      cx[i + 1]! + r1 * bx,
+      cy[i + 1]! + r1 * by,
+      cx[i]! + r0 * bx,
+      cy[i]! + r0 * by,
+    ];
+    // 5. Umlaufsinn positiv
+    let area = 0;
+    for (let j = 0; j < 4; j++) {
+      const k = (j + 1) % 4;
+      area += q[j * 2]! * q[k * 2 + 1]! - q[k * 2]! * q[j * 2 + 1]!;
+    }
+    if (area < 0) {
+      for (let j = 3; j >= 0; j--) quads.push(q[j * 2]!, q[j * 2 + 1]!);
+    } else quads.push(...q);
+    hasQuad.push(true);
+    tanA.push([ax, ay]);
+    tanB.push([bx, by]);
+  }
+  // Textmarker (stumpfe Enden): keine Scheibe am ersten und letzten Punkt (dort schließt ein Trapez an). Dazu keine
+  // Scheibe der Folgepunkte, die über die Schnittkante am Ende hinausragt, sonst wäre das Ende wieder rund.
+  const skip = new Array<boolean>(n).fill(false);
+  if (!cap && n >= 2) {
+    const edge = (from: number, step: 1 | -1) => {
+      const last = from + step;
+      if (!hasQuad[Math.min(from, last)]) return;
+      const ux = (cx[last]! - cx[from]!) / Math.hypot(cx[last]! - cx[from]!, cy[last]! - cy[from]!);
+      const uy = (cy[last]! - cy[from]!) / Math.hypot(cx[last]! - cx[from]!, cy[last]! - cy[from]!);
+      skip[from] = true;
+      for (let j = from + step; j > 0 && j < n - 1; j += step) {
+        const reach = (cx[j]! - cx[from]!) * ux + (cy[j]! - cy[from]!) * uy;
+        if (!(reach < cd[j]! / 2) || !hasQuad[Math.min(j, j - step)] || !hasQuad[Math.min(j, j + step)])
+          break;
+        skip[j] = true;
+      }
+    };
+    edge(0, 1);
+    edge(n - 1, -1);
+  }
+  // 3. Scheiben. Eine Scheibe an einem inneren Punkt füllt nur den Keil an der Außenseite einer Biegung zwischen den
+  // beiden Trapezen. Ist der Keil so schmal, dass die Sehne weniger als `discTolerance` (pt) von der Kreislinie
+  // abweicht, lässt der Renderer die Scheibe weg: Das Auge sieht nichts, der Pfad hat aber viel weniger Teilpfade.
+  const tol = SHAPE_TUNING.discTolerance;
+  if (tol > 0) {
+    for (let j = 1; j + 1 < n; j++) {
+      if (skip[j] || !hasQuad[j - 1] || !hasQuad[j]) continue;
+      const turn = Math.max(
+        Math.acos(Math.min(1, tanA[j - 1]![0]! * tanA[j]![0]! + tanA[j - 1]![1]! * tanA[j]![1]!)),
+        Math.acos(Math.min(1, tanB[j - 1]![0]! * tanB[j]![0]! + tanB[j - 1]![1]! * tanB[j]![1]!)),
+      );
+      if ((cd[j]! / 2) * (1 - Math.cos(turn / 2)) <= tol) skip[j] = true;
+    }
+  }
+  const circles: number[] = [];
+  let maxDiam = 0;
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (let i = 0; i < n; i++) {
+    if (cd[i]! > maxDiam) maxDiam = cd[i]!;
+    if (cx[i]! < x0) x0 = cx[i]!;
+    if (cx[i]! > x1) x1 = cx[i]!;
+    if (cy[i]! < y0) y0 = cy[i]!;
+    if (cy[i]! > y1) y1 = cy[i]!;
+    if (n === 1 && !cap) {
+      // Textmarker aus einem Punkt: Quadrat mit der Kantenlänge des Durchmessers
+      const h = cd[0]! / 2;
+      quads.push(
+        cx[0]! - h,
+        cy[0]! - h,
+        cx[0]! + h,
+        cy[0]! - h,
+        cx[0]! + h,
+        cy[0]! + h,
+        cx[0]! - h,
+        cy[0]! + h,
+      );
+    } else if (!skip[i]) circles.push(cx[i]!, cy[i]!, cd[i]! / 2);
+  }
+  sh = {
+    circles: Float64Array.from(circles),
+    quads: Float64Array.from(quads),
+    chainLength: dense,
+    filled: dense - n0,
+    simplified: n,
+    center: { x0, y0, x1, y1 },
+    maxDiam,
+  };
+  shapes.set(d, sh);
+  return sh;
+}
+
+function drawShape2(ctx: CanvasRenderingContext2D, d: DecodedStroke): void {
+  const sh = strokeShape(d);
+  ctx.fillStyle = rgba(d.color, d.color.a * styleOf(d).alpha);
+  ctx.beginPath();
+  const { circles, quads } = sh;
+  for (let i = 0; i < circles.length; i += 3) {
+    const x = circles[i]!;
+    const y = circles[i + 1]!;
+    const r = circles[i + 2]!;
+    // Ohne moveTo zöge der Pfad eine Linie vom vorigen Teilpfad zum Kreis
+    ctx.moveTo(x + r, y);
+    ctx.arc(x, y, r, 0, Math.PI * 2, false);
+    ctx.closePath();
+  }
+  for (let i = 0; i < quads.length; i += 8) {
+    ctx.moveTo(quads[i]!, quads[i + 1]!);
+    ctx.lineTo(quads[i + 2]!, quads[i + 3]!);
+    ctx.lineTo(quads[i + 4]!, quads[i + 5]!);
+    ctx.lineTo(quads[i + 6]!, quads[i + 7]!);
+    ctx.closePath();
+  }
+  ctx.fill('nonzero');
+}
+
 /** Zeichnet einen Strich als gefüllten, geglätteten Umriss (ein Pfad, damit Transparenz nicht doppelt deckt). */
 export function drawStroke(ctx: CanvasRenderingContext2D, d: DecodedStroke): void {
+  if (d.diam) {
+    drawShape2(ctx, d);
+    return;
+  }
   const pts = strokeOutline(d);
   if (pts.length < 2) return;
   ctx.fillStyle = rgba(d.color, d.color.a * styleOf(d).alpha);
@@ -189,6 +489,15 @@ export function strokeBounds(d: DecodedStroke): Rect {
     if (x > x1) x1 = x;
     if (y < y0) y0 = y;
     if (y > y1) y1 = y;
+  }
+  if (d.diam) {
+    // v2: Mittelpunkte der Kette (auch die verdichteten, die Kurve kann über die Eingabepunkte hinausschwingen),
+    // dazu der halbe größte Durchmesser
+    const sh = strokeShape(d);
+    const pad = sh.maxDiam / 2 + 2;
+    r = { x0: sh.center.x0 - pad, y0: sh.center.y0 - pad, x1: sh.center.x1 + pad, y1: sh.center.y1 + pad };
+    bounds.set(d, r);
+    return r;
   }
   const pad = d.width * Math.max(styleOf(d).size * 2, 1) + 2;
   r = { x0: x0 - pad, y0: y0 - pad, x1: x1 + pad, y1: y1 + pad };
