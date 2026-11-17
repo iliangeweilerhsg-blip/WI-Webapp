@@ -72,10 +72,13 @@ import {
 } from '../src/backup-commands.ts';
 import {
   errorText,
+  linkedFilesWarning,
+  recordLeftovers,
   runBackup,
   thin,
   validateTarget,
   type BackupDeps,
+  type Leftover,
   type OwnedStands,
 } from '../src/backup.ts';
 import {
@@ -286,6 +289,12 @@ class FakePg implements PgAccess {
         )
         .reverse()[0];
       return previous ? [[(previous.thinLeft as string[]).join('/')]] : [];
+    }
+    if (sql.includes('SET warning = NULLIF')) {
+      // Nur die Warnung (Ausdünnen lief nicht): thin_left bleibt unberührt
+      const run = this.runs.get(vars.id as string);
+      if (run) run.warning = vars.warning === '' ? null : (vars.warning as string);
+      return [];
     }
     if (sql.includes('SET thin_left = ')) {
       const run = this.runs.get(vars.id as string);
@@ -3155,6 +3164,95 @@ describe('Restpunkte aus #324: Hash beim Kopieren, verlinkte Dateien prüfen, Li
     expect(await runRestore(s.deps, { stand: STAND2, test: true, yes: false })).toBe(0);
     // Der vorige Stand ist wie erwartet beschädigt
     expect(await runRestore(s.deps, { stand: STAND, test: true, yes: false })).toBe(1);
+  });
+
+  const runOf = (s: Awaited<ReturnType<typeof prepared>>, stand: string) =>
+    [...s.pg.runs.values()].find((r) => r.stand === stand);
+
+  it('#324: manipulierte verlinkte Datei steht in backup_run.warning (Anzahl, relativer Pfad, kein absoluter Pfad)', async () => {
+    const s = await prepared();
+    expect(runOf(s, STAND)?.warning ?? null).toBeNull();
+    tamperKeepingTimes(join(s.target, STAND, 'media', 'photos', 'a.jpg'), 'JPEX');
+    const errs: string[] = [];
+    expect(await runBackup({ ...second(s), err: (m) => errs.push(m) }, { trigger: 'manuell' })).toBe(0);
+    const warning = runOf(s, STAND2)?.warning as string;
+    expect(warning).toBe(
+      `Eine unveränderte Datei weicht vom vorigen Stand ab (media/photos/a.jpg) und wurde neu kopiert statt verlinkt. ` +
+        `Prüfe den Stand ${STAND} mit „pnpm sg restore --test ${STAND}“.`,
+    );
+    expect(warning).not.toContain(s.target);
+    expect(warning).not.toContain(s.dataDir);
+    expect(errs.join('\n')).toContain(`Warnung: ${warning}`);
+  });
+
+  it('#324: ohne Abweichung bleibt warning leer', async () => {
+    const s = await prepared();
+    expect(await runBackup(second(s), { trigger: 'manuell' })).toBe(0);
+    expect(runOf(s, STAND2)?.warning ?? null).toBeNull();
+  });
+
+  it('#324: mehrere Dateien: Anzahl und höchstens die ersten 3 Pfade, Rest als „und N weitere“', () => {
+    const paths = ['media/a.jpg', 'media/b.jpg', 'vault/c.md', 'vault/d.md', 'vault/e.md'];
+    const w = linkedFilesWarning(paths, STAND) as string;
+    expect(w).toContain('5 unveränderte Dateien weichen vom vorigen Stand ab');
+    expect(w).toContain('(media/a.jpg, media/b.jpg, vault/c.md und 2 weitere)');
+    expect(w).not.toContain('vault/d.md');
+    expect(linkedFilesWarning([], STAND)).toBeNull();
+    // Zeilenumbrüche aus Dateinamen wirken nicht in die Anzeige
+    expect(linkedFilesWarning(['media/a\nb.jpg'], STAND)).toContain('media/a?b.jpg');
+  });
+
+  it('#324: zusammen mit einer bestehenden Warnung (Reste vom Ausdünnen): beide drin, getrennt mit „ · “, höchstens 500 Zeichen', async () => {
+    const s = await prepared();
+    // Rest vom vorigen Lauf, der auch jetzt stehen bleibt: Warnung zu Resten
+    const run = runOf(s, STAND);
+    if (run) run.thinLeft = ['20261001T030000Z'];
+    const stuck: Leftover = { name: '20261001T030000Z', reason: 'x', cause: 'EPERM' };
+    const deps = { pg: s.pg, err: () => {}, cfg: s.backupDeps.cfg };
+    const id = '019a4e14-0000-7000-8000-0000000000d1';
+    s.pg.runs.set(id, {
+      id,
+      state: 'fertig',
+      error: null,
+      stand: STAND2,
+      size: null,
+      sha: null,
+      trigger: 'manuell',
+      target: run?.target as string,
+    });
+    const linked = linkedFilesWarning(['media/photos/a.jpg'], STAND);
+    await recordLeftovers(deps, id, run?.target as string, [stuck], linked);
+    const warning = s.pg.runs.get(id)?.warning as string;
+    expect(warning).toContain('media/photos/a.jpg');
+    expect(warning).toContain('lässt sich seit mehreren Läufen nicht löschen');
+    expect(warning).toContain(' · ');
+    expect(warning.indexOf('media/photos/a.jpg')).toBeLessThan(warning.indexOf(' · '));
+    expect(warning.length).toBeLessThanOrEqual(500);
+    // Zu lang: auf 500 Zeichen mit „…“ gekürzt, die Anzahl am Anfang bleibt
+    const many = Array.from({ length: 40 }, (_, i) => `media/${'x'.repeat(90)}${i}.jpg`);
+    await recordLeftovers(deps, id, run?.target as string, [stuck], linkedFilesWarning(many, STAND));
+    const cut = s.pg.runs.get(id)?.warning as string;
+    expect(cut.length).toBeLessThanOrEqual(500);
+    expect(cut.startsWith('40 unveränderte Dateien weichen')).toBe(true);
+    expect(cut.endsWith('…')).toBe(true);
+  });
+
+  it('#324: Ausdünnen schlägt fehl: die Warnung zu verlinkten Dateien wird trotzdem eingetragen, thin_left bleibt', async () => {
+    const s = await prepared();
+    tamperKeepingTimes(join(s.target, STAND, 'media', 'photos', 'a.jpg'), 'JPEX');
+    const original = s.pg.query.bind(s.pg);
+    let thinFail = false;
+    s.pg.query = async (sql, vars, db) => {
+      // `readOwnedStands` für das Ausdünnen (zweiter Aufruf) scheitern lassen
+      if (sql.includes("SELECT stand, trigger, coalesce(dump_sha256, '')")) {
+        if (thinFail) throw new Error('kaputt');
+        thinFail = true;
+      }
+      return original(sql, vars, db);
+    };
+    expect(await runBackup(second(s), { trigger: 'manuell' })).toBe(0);
+    expect(runOf(s, STAND2)?.warning).toContain('media/photos/a.jpg');
+    expect(runOf(s, STAND2)?.thinLeft ?? null).toBeNull();
   });
 
   it('vorige Datei nicht lesbar: eigene Meldung, wird kopiert', async () => {

@@ -24,6 +24,7 @@ import {
   rootCause,
   listStands,
   MANIFEST_FILE,
+  oneLine,
   readManifest,
   readManifestAt,
   removeStalePartialsReport,
@@ -408,6 +409,7 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
     out.adopt(target, targetDir);
     const created = out.mkdir(partial);
     let owner: number | undefined;
+    let linkedWarn: string | null = null;
 
     try {
       // Eigen ist im Ziel, was den Besitzer des eigenen `.partial` hat (#183), nicht zwingend den Benutzer des Laufs.
@@ -449,6 +451,8 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
       reader.adopt(target, targetDir);
       const previousDir = previous ? reader.child(target, previous, 'skip') : null;
       const sums = emptySums();
+      // Verlinkte Dateien mit Abweichung (relativ im Stand), für `backup_run.warning` (#324)
+      const damagedLinks: string[] = [];
       for (const sub of ['media', 'vault'] as const) {
         const source = join(cfg.dataDir, sub);
         if (!existsSync(source)) continue;
@@ -465,7 +469,8 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
           reader,
           owner,
           sums: sums[sub],
-          onDamagedLink: (path, reason) =>
+          onDamagedLink: (path, reason) => {
+            damagedLinks.push(`${sub}/${path}`);
             log(
               reason === 'unreadable'
                 ? `  WARNUNG: ${sub}/${path} ist im vorigen Stand ${previous} nicht lesbar. Die Datei wird neu kopiert statt ` +
@@ -473,7 +478,8 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
                 : `  WARNUNG: ${sub}/${path} unterscheidet sich vom vorigen Stand ${previous} trotz gleicher Größe und Zeit. ` +
                     'Sie wird neu kopiert statt verlinkt. Ist die Quelle unverändert, ist der vorige Stand an dieser Datei ' +
                     `beschädigt; prüfen mit \`pnpm sg restore --test ${previous}\`.`,
-            ),
+            );
+          },
         });
         log(
           `  ${stats[sub].files} Dateien, ${stats[sub].copied} neu kopiert, ${stats[sub].linked} unverändert`,
@@ -517,6 +523,7 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
         );
       }
       log(`Backup ${stand} fertig (${size} Bytes).`);
+      linkedWarn = previous ? linkedFilesWarning(damagedLinks, previous) : null;
     } catch (error) {
       // Nur Eigenes entfernen, nie einem Symlink folgend; Fremdes bleibt liegen (Ausdünnen räumt alte .partial weg)
       const left = out.cleanup();
@@ -539,7 +546,11 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
     }
     const ownerWarn = thinned ? foreignOwnerWarning(thinned.foreign ?? []) : null;
     if (ownerWarn) err(`Warnung: ${ownerWarn}`);
-    if (runId && thinned) await recordLeftovers(deps, runId, targetSetting, thinned.left, ownerWarn);
+    if (linkedWarn) err(`Warnung: ${linkedWarn}`);
+    // Auch ohne Ausdünnen eintragen (`left: null`): Die Warnung zu verlinkten Dateien gehört zum Lauf, nicht zum Ausdünnen
+    const extra = joinWarnings(linkedWarn, ownerWarn);
+    if (runId && (thinned || extra))
+      await recordLeftovers(deps, runId, targetSetting, thinned?.left ?? null, extra);
     return 0;
   } catch (error) {
     return await fail(errorText(error, cfg), 1);
@@ -830,15 +841,16 @@ export function leftoverWarning(stuck: Leftover[]): string | null {
 
 /**
  * Reste des Ausdünnens am Lauf festhalten (`backup_run.thin_left`) und warnen, wenn ein Rest schon nach dem vorigen
- * Lauf mit demselben Ziel stehen blieb (`backup_run.warning`, H3). `extra`: eine weitere Warnung (Besitzer, #183), die
- * vor der zu den Resten steht. Fehlt die Spalte (Backup vor der Migration, die sie anlegt), passiert nichts. Fehler
+ * Lauf mit demselben Ziel stehen blieb (`backup_run.warning`, H3). `extra`: weitere Warnungen (verlinkte Dateien #324,
+ * Besitzer #183), die vor der zu den Resten stehen. `left: null`: das Ausdünnen lief nicht, `thin_left` bleibt unberührt,
+ * nur `warning` wird eingetragen. Fehlt die Spalte (Backup vor der Migration, die sie anlegt), passiert nichts. Fehler
  * hier machen das Backup nicht ungültig.
  */
 export async function recordLeftovers(
   deps: Pick<BackupDeps, 'pg' | 'err' | 'cfg'>,
   runId: string,
   targetSetting: string,
-  left: Leftover[],
+  left: Leftover[] | null,
   extra: string | null = null,
 ): Promise<void> {
   const { pg } = deps;
@@ -856,9 +868,16 @@ export async function recordLeftovers(
       { id: runId, target: targetSetting },
     );
     const before = new Set((previous?.[0] ?? '').split('/').filter((name) => name !== ''));
-    const stuck = leftoverWarning(left.filter((l) => before.has(l.name)));
+    const stuck = left ? leftoverWarning(left.filter((l) => before.has(l.name))) : null;
     if (stuck) deps.err(`Warnung: ${stuck}`);
     const warning = joinWarnings(extra, stuck);
+    if (left === null) {
+      await pg.query(
+        `UPDATE backup_run SET warning = NULLIF(:'warning', ''), updated_at = now() WHERE id = :'id'::uuid`,
+        { id: runId, warning: warning ?? '' },
+      );
+      return;
+    }
     await pg.query(
       `UPDATE backup_run SET thin_left = string_to_array(:'left', '/'), warning = NULLIF(:'warning', ''),
               updated_at = now()
@@ -870,9 +889,36 @@ export async function recordLeftovers(
   }
 }
 
-/** Zwei Warnungen in einem Text für `backup_run.warning`, höchstens 500 Zeichen (`null`: keine) */
-function joinWarnings(first: string | null, second: string | null): string | null {
-  const text = [first, second].filter((w): w is string => w !== null && w !== '').join(' ');
+/** So viele Dateipfade nennt die Warnung zu verlinkten Dateien höchstens */
+const LINKED_PATHS_MAX = 3;
+
+/**
+ * Warnung für die Oberfläche (`backup_run.warning`): unveränderte Dateien wichen vom vorigen Stand ab oder waren dort
+ * nicht lesbar und wurden neu kopiert statt verlinkt (#324). Nennt die Anzahl und höchstens die ersten 3 Pfade
+ * relativ im Backup (`media/…`, `vault/…`), nie absolute Pfade. Pfade aus dem Datenordner: Steuerzeichen werden zu `?`,
+ * ein einzelner Pfad wird auf 100 Zeichen gekürzt. `null`: keine Abweichung.
+ */
+export function linkedFilesWarning(paths: string[], previous: string): string | null {
+  if (paths.length === 0) return null;
+  const shown = paths.slice(0, LINKED_PATHS_MAX).map((p) => {
+    const line = oneLine(p);
+    return line.length > 100 ? `${line.slice(0, 99)}…` : line;
+  });
+  const rest = paths.length - shown.length;
+  const list = `${shown.join(', ')}${rest > 0 ? ` und ${rest} weitere` : ''}`;
+  const what =
+    paths.length === 1
+      ? 'Eine unveränderte Datei weicht vom vorigen Stand ab'
+      : `${paths.length} unveränderte Dateien weichen vom vorigen Stand ab`;
+  return (
+    `${what} (${list}) und wurde${paths.length === 1 ? '' : 'n'} neu kopiert statt verlinkt. ` +
+    `Prüfe den Stand ${previous} mit „pnpm sg restore --test ${previous}“.`
+  );
+}
+
+/** Warnungen in einem Text für `backup_run.warning`, getrennt mit „ · “, höchstens 500 Zeichen mit „…“ (`null`: keine) */
+function joinWarnings(...warnings: (string | null)[]): string | null {
+  const text = warnings.filter((w): w is string => w !== null && w !== '').join(' · ');
   if (text === '') return null;
   return text.length <= WARNING_MAX ? text : `${text.slice(0, WARNING_MAX - 1)}…`;
 }

@@ -367,7 +367,7 @@ backup_run(started_at timestamptz, finished_at timestamptz NULL, target text,
   dump_sha256 text NULL,                -- SHA-256 des Dumps (64 Hex); der Restore-Test vertraut nur Ständen mit dieser Prüfsumme im Manifest
   files_sha256 text NULL,               -- SHA-256 der Prüfsummenliste files.sha256 (64 Hex), Vertrauensanker für media/ und vault/
   thin_left text[] NULL,                -- Reste des Ausdünnens nach dem Lauf (Stände/.partial, die stehen blieben); nur für den Vergleich mit dem nächsten Lauf, nicht in der API
-  warning text NULL)                    -- Warnung zum Lauf, höchstens 500 Zeichen (z. B. Stand, der sich seit mehreren Läufen nicht entfernen lässt)
+  warning text NULL)                    -- Warnung zum Lauf, höchstens 500 Zeichen (z. B. Stand, der sich seit mehreren Läufen nicht entfernen lässt; verlinkte Dateien, die vom vorigen Stand abwichen und neu kopiert wurden; mehrere Warnungen getrennt mit „ · “)
 
 setting(key text primary key, value jsonb)
 ```
