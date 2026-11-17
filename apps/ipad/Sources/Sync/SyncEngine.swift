@@ -20,7 +20,7 @@ private enum SyncIncoming: Sendable {
         var message: String
     }
 
-    case welcome(dbEpoch: String)
+    case welcome(dbEpoch: String, features: [String])
     case inbound(SyncInbound)
     case timePong(t0: Int, ts: Int)
     case pong
@@ -87,7 +87,7 @@ final class SyncEngine {
     /// Höchstens so viele Operationen ohne Antwort im Flug (VERTRAEGE §11.2)
     static let window = 200
     /// Größere Nachrichten schließt der Server mit 1009. Sie kommen direkt in die Fehlerablage.
-    static let maxMessageBytes = 1_000_000
+    nonisolated static let maxMessageBytes = 1_000_000
     /// So oft darf dieselbe Operation mit `internal_error` scheitern, bevor sie in die Fehlerablage geht
     static let maxInternalErrors = 5
     static let pingInterval: Duration = .seconds(15)
@@ -143,6 +143,10 @@ final class SyncEngine {
     private let now: @MainActor () -> Date
     private let sleeper: @MainActor (Duration) async throws -> Void
     private let random: @MainActor () -> Double
+    /// Hier merkt sich die Engine die Fähigkeiten des Core (`welcome.features`), je gekoppeltem Mac dauerhaft. `nil`
+    /// (nur Tests): Der Wert lebt nur im Speicher.
+    private let capabilities: (any PairedMacStore)?
+    @ObservationIgnored private var memoryStrokeSizes = false
 
     @ObservationIgnored private var runningMac: PairedMac?
     /// `suspendConnections()` hat eine laufende Schleife angehalten; `resumeConnections()` nimmt sie wieder auf
@@ -174,7 +178,8 @@ final class SyncEngine {
         appVersion: String? = nil,
         now: @escaping @MainActor () -> Date = { Date() },
         sleep: @escaping @MainActor (Duration) async throws -> Void = { try await _Concurrency.Task.sleep(for: $0) },
-        random: @escaping @MainActor () -> Double = { Double.random(in: 0..<1) }
+        random: @escaping @MainActor () -> Double = { Double.random(in: 0..<1) },
+        capabilities: (any PairedMacStore)? = nil
     ) {
         self.client = client
         self.sockets = sockets
@@ -185,12 +190,14 @@ final class SyncEngine {
         self.now = now
         self.sleeper = sleep
         self.random = random
+        self.capabilities = capabilities
         refreshCounts()
     }
 
     /// Die echte Engine: Dateien in „Application Support/Sync“, URLSession-WebSocket
     static func live(
-        client: CoreClient, tokenStore: any TokenStore, appVersion: String?, library: any InkLibraryStore
+        client: CoreClient, tokenStore: any TokenStore, appVersion: String?, library: any InkLibraryStore,
+        capabilities: any PairedMacStore
     ) -> SyncEngine {
         let base =
             FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -202,8 +209,24 @@ final class SyncEngine {
             outbox: SyncOutbox(directory: directory),
             library: library,
             tokenStore: tokenStore,
-            appVersion: appVersion
+            appVersion: appVersion,
+            capabilities: capabilities
         )
+    }
+
+    /// Meldet der Core `stroke_sizes` (VERTRAEGE §23.4, §23.7)? Der Wert vom letzten `welcome` bleibt über
+    /// Neustarts erhalten, damit auch offline entstandene Striche ihn nutzen. Vor dem ersten `welcome` und nach dem
+    /// Entkoppeln ist er `false`. Gelesen wird bei jedem Aufruf, nichts wird zwischengespeichert.
+    var strokeSizesSupported: Bool {
+        capabilities?.strokeSizes ?? memoryStrokeSizes
+    }
+
+    private func rememberStrokeSizes(_ supported: Bool) {
+        if let capabilities {
+            capabilities.setStrokeSizes(supported)
+        } else {
+            memoryStrokeSizes = supported
+        }
     }
 
     /// Pfad der Fehlerablage (für „Teilen“)
@@ -771,8 +794,8 @@ final class SyncEngine {
     private func handle(_ text: String, link: SyncLink) async {
         guard link === self.link else { return }
         switch SyncEngine.parse(text) {
-        case .welcome(let epoch):
-            await onWelcome(dbEpoch: epoch, link: link)
+        case .welcome(let epoch, let features):
+            await onWelcome(dbEpoch: epoch, features: features, link: link)
         case .timePong(let t0, let ts):
             await onTimePong(t0: t0, ts: ts, link: link)
         case .inbound(let value):
@@ -812,7 +835,7 @@ final class SyncEngine {
         }
         switch message {
         case .welcome(let value):
-            return .welcome(dbEpoch: value.dbEpoch)
+            return .welcome(dbEpoch: value.dbEpoch, features: value.features ?? [])
         case .timePong(let value):
             return .timePong(t0: value.t0, ts: value.ts)
         case .pong:
@@ -879,7 +902,9 @@ final class SyncEngine {
         )
     }
 
-    private func onWelcome(dbEpoch: String, link: SyncLink) async {
+    private func onWelcome(dbEpoch: String, features: [String], link: SyncLink) async {
+        // Unbekannte Einträge werden ignoriert, fehlendes `features` ist leer (VERTRAEGE §23.4)
+        rememberStrokeSizes(features.contains("stroke_sizes"))
         link.welcomed = true
         link.welcomedAt = now()
         link.lastPongAt = now()

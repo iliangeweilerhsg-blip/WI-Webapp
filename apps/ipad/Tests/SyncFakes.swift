@@ -99,6 +99,8 @@ final class FakeSyncSocket: SyncSocket {
     var opPolicy: (_ opID: String, _ kind: String, _ index: Int) -> FakeOpReply = { _, _, _ in .ack }
     var answersPing = true
     var epoch = "epoch-1"
+    /// `features` im `welcome` (VERTRAEGE §23.4). `nil`: Das Feld fehlt, wie bei einem Core vor Strichformat v2.
+    var features: [String]?
     /// Versatz Mac − iPad, den der Fake in `time.pong` meldet (die virtuelle Uhr steht still)
     var timeOffset = 2000
     /// Die Verbindung scheitert gleich beim ersten Lesen
@@ -113,9 +115,11 @@ final class FakeSyncSocket: SyncSocket {
         else { return }
         switch type {
         case "hello":
+            let featuresJSON =
+                features.map { ",\"features\":[" + $0.map { "\"\($0)\"" }.joined(separator: ",") + "]" } ?? ""
             push(
                 """
-                {"type":"welcome","protocol":1,"device_id":"\(Fixtures.deviceID)","server_version":"0.1.0","server_time":1762246500000,"db_epoch":"\(epoch)","resume":[]}
+                {"type":"welcome","protocol":1,"device_id":"\(Fixtures.deviceID)","server_version":"0.1.0","server_time":1762246500000,"db_epoch":"\(epoch)"\(featuresJSON),"resume":[]}
                 """)
         case "time.ping":
             let t0 = object["t0"] as? Int ?? 0
@@ -253,6 +257,8 @@ final class SyncHarness {
     let library: FileInkLibraryStore
     let service: InkLibraryService
     let tokens: FakeTokenStore
+    /// Hier merkt sich die Engine die Fähigkeiten des Core (`strokeSizes`)
+    let macs: FakePairedMacStore
     let transport: FakeTransport
     let factory: FakeSyncSocketFactory
     let engine: SyncEngine
@@ -303,6 +309,8 @@ final class SyncHarness {
         self.factory = factory
         self.library = library
         self.tokens = tokens
+        let macs = FakePairedMacStore()
+        self.macs = macs
         self.binding = binding
         let client = Fixtures.client(transport, interfaces: interfaces, routing: routing)
         let engine = SyncEngine(
@@ -314,7 +322,8 @@ final class SyncHarness {
             appVersion: "1.2.3",
             now: { clock.date },
             sleep: { try await clock.sleep($0) },
-            random: { 0 }
+            random: { 0 },
+            capabilities: macs
         )
         self.engine = engine
         self.client = client

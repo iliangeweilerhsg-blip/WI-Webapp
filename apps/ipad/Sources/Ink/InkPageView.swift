@@ -838,6 +838,7 @@ struct InkPageView: View {
             store: store,
             outboxMark: sync.outboxMark(forPage: target.pageID)
         )
+        page.includeSizes = sync.strokeSizesSupported
         page.outboxNumberProvider = { [weak library] in library?.sync.outboxLastNumber ?? 0 }
         page.sessionStartedAt = target.sessionStartMS.map { Date(timeIntervalSince1970: Double($0) / 1000) }
         let pageID = target.pageID

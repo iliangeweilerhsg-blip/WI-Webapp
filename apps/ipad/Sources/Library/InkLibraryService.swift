@@ -431,6 +431,7 @@ final class InkLibraryService {
         guard let moduleID, store.modules.contains(where: { $0.id == moduleID }) else { return }
 
         let legacyModel = InkPageModel(pageID: legacyID, store: pageStore, saveDelay: .seconds(1))
+        legacyModel.includeSizes = sync.strokeSizesSupported
         // Unlesbar (#252): nicht als „leer“ abhaken. Der nächste Start versucht es noch einmal.
         guard !legacyModel.isUnreadable else { return }
         guard !legacyModel.neutralStrokes().isEmpty else {
@@ -459,6 +460,7 @@ final class InkLibraryService {
             return
         }
         let model = InkPageModel(pageID: pageID, store: pageStore, saveDelay: .seconds(1))
+        model.includeSizes = sync.strokeSizesSupported
         guard !model.isUnreadable else { return }
         let strokes = model.neutralStrokes()
 
@@ -1103,6 +1105,7 @@ final class InkLibraryService {
             saveDelay: .seconds(3600),
             outboxMark: sync.outboxMark(forPage: pageID)
         )
+        model.includeSizes = sync.strokeSizesSupported
         // Unlesbar (#252): aus dem Durchgang nehmen, damit die Zeile nicht ewig eine offene Seite zählt
         noteReadability(of: model)
         guard !model.isUnreadable else { return .skipped }
