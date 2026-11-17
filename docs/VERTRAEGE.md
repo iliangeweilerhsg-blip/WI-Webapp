@@ -3,7 +3,7 @@
 Diese Datei legt fest, wie Core, Worker, Web-App, iPad-App und `sg`-CLI zusammenspielen. So können die Teile parallel gebaut werden (`AGENTS.md`, Regel 4).
 Änderungen nur durch den Lead. Datenformate selbst stehen in `packages/schemas`.
 
-§1–5 gelten seit Phase 0. §6–16 sind die Verträge und der Ticketplan für Phase 1, §17 ist der Moodle-Abgleich. Ab §18 folgt Phase 2: §18 Transkription und Rückblick, §19 Suche, §20 Konzepte, Inbox und Zusammenfassung. §21 ist der vorgezogene Schnitt „Karten und Wiederholung“ (Minimal-Lernen) aus Phase 3.
+§1–5 gelten seit Phase 0. §6–16 sind die Verträge und der Ticketplan für Phase 1, §17 ist der Moodle-Abgleich. Ab §18 folgt Phase 2: §18 Transkription und Rückblick, §19 Suche, §20 Konzepte, Inbox und Zusammenfassung. §21 ist der vorgezogene Schnitt „Karten und Wiederholung“ (Minimal-Lernen) aus Phase 3. §22 regelt Folien in der Vorlesung, §23 das Strichformat v2 (Breite je Punkt).
 
 ## 1. Umgebungsvariablen
 
@@ -624,7 +624,7 @@ Ergänzt 08 §2. Alle Nachrichten: `SyncClientMessage` bzw. `SyncServerMessage`.
   2. Vor `welcome` prüft er das Gerät noch einmal in der Datenbank (`device.deleted_at`). Das deckt auch einen Widerruf ab, den der Speicher nicht kennt (z. B. über einen Neustart hinweg). Treffer: wie oben.
 - **Kein Token in `hello`.** `hello.device_id` ist optional und dient nur als Gegenprobe. Passt sie nicht zum Token: `error device_token_invalid` (fatal), Code 4401. Lokal gibt es kein Token zum Vergleichen: Der Server ignoriert `hello.device_id`, und `welcome.device_id` ist `null`.
 - **Erste Nachricht** muss innerhalb von 5 s `hello` sein, sonst `error hello_required` und Schließen mit Code 4408. `protocol` ≠ 1: `error protocol_unsupported` (fatal), Code 4426. Verletzt `hello` das Schema: `error hello_invalid` (fatal), ebenfalls Code 4408 („kein gültiges `hello`“).
-- **Antwort** `welcome` mit `server_time`, `db_epoch` und je Strom einem `resume`-Eintrag. Danach sendet der Server:
+- **Antwort** `welcome` mit `server_time`, `db_epoch` und je Strom einem `resume`-Eintrag. Optional `features` (§23.4): Fähigkeiten des Core, heute `stroke_sizes`. Danach sendet der Server:
   1. die fehlenden Operationen jedes Stroms ab `from_seq` bis `head_seq` in `seq`-Reihenfolge,
   2. die aktuellen `presence`- und `device.connection`-Ereignisse der anderen Clients.
 - **Resume-Fälle** je Strom aus `hello.streams` bzw. `subscribe`:
@@ -697,7 +697,7 @@ Bei `reset` legt der Server kein Abo an. Der Client abonniert nach dem REST-Abgl
 | `page.update` | `fields` (vollständiger Stand) übernehmen, wenn `version` der aktuellen entspricht, dann `version + 1`. Sonst `error page_version_conflict` (`retryable = false`). Der Client verfährt wie in §11.2 (neu laden, Felder auflegen, erneut senden) |
 | `page.delete` | Seite mit Strichen und Elementen weich löschen (gleiches `deleted_at`). Vom iPad oder als Server-Operation |
 | `page.restore` | **Nur Server**, nach Wiederherstellung aus dem Papierkorb. Clients laden die Seite per REST neu |
-| `stroke.add` | **Upsert** über `(page_id, client_id)`, letzter Stand gewinnt. Ein gelöschter Strich wird dabei wiederbelebt. Lasso, Umfärben und Skalieren schicken nur `stroke.add` mit gleicher `client_id` (08 §4.3). Ungültige Striche ergeben `message_invalid` (`retryable = false`): `points` kein Base64, kein ganzes Vielfaches von 24 Byte, leer, über 750 000 Byte oder mit NaN/Unendlich; `width`, `transform` und `bbox` nicht endlich oder außerhalb von float4 (Betrag ≤ 3,4e38), `width ≤ 0`. `clock_uncertain` aus dem Umschlag wird in `stroke.clock_uncertain` gespeichert, `created_at` (ms) als `timestamptz` |
+| `stroke.add` | **Upsert** über `(page_id, client_id)`, letzter Stand gewinnt. Ein gelöschter Strich wird dabei wiederbelebt. Lasso, Umfärben und Skalieren schicken nur `stroke.add` mit gleicher `client_id` (08 §4.3). Ungültige Striche ergeben `message_invalid` (`retryable = false`): `points` kein Base64, kein ganzes Vielfaches von 24 Byte, leer, über 750 000 Byte oder mit NaN/Unendlich; `width`, `transform` und `bbox` nicht endlich oder außerhalb von float4 (Betrag ≤ 3,4e38), `width ≤ 0`. Mit `sizes` (Breite je Punkt, §23) gelten zusätzlich die Prüfungen aus §23.6, und die 750 000 Byte zählen für `points` und `sizes` zusammen. `clock_uncertain` aus dem Umschlag wird in `stroke.clock_uncertain` gespeichert, `created_at` (ms) als `timestamptz` |
 | `stroke.remove` | `deleted_at` setzen. Unbekannte `client_id` werden ignoriert |
 | `element.upsert` / `element.remove` | Upsert über `element_id` bzw. weich löschen. Liegt die `element_id` schon auf einer anderen Seite, folgt `stream_mismatch` (nie stillschweigend verschieben) |
 | `drawing.snapshot` | Hinweis an andere iPads, dass `PUT /pages/{id}/pkdrawing` mit diesem sha256 hochgeladen wurde. Der Core bestätigt immer. Ob die Datei vorliegt, zeigt `Page.has_pkdrawing` |
@@ -2834,3 +2834,290 @@ Keine Änderung am Worker. Für eine Session, die erst nach einigen Minuten Foli
 **Kriterien für F3a und F3b** (zusätzlich zu den Testfällen in §17.8): je `pnpm typecheck`, `pnpm lint`, `pnpm format:check` und die Tests des Core grün. Bei F3a zusätzlich `pnpm schemas:check`, ohne geänderte generierte Datei (F3a fasst `packages/schemas/**` nicht an).
 
 **Nur der Owner kann testen:** ob der Vorschlag im Alltag stimmt (22.2: Fassungen, Dozenten, die alles vorab hochladen), ob das Angebot aus Moodle im Hörsaal rechtzeitig kommt, und ob das iPad die Folien einer laufenden Vorlesung ohne Neustart zeigt.
+
+## 23. Strichformat v2: Breite je Punkt (F-INK, F-DSH-04)
+
+**Anlass (Owner, echtes iPad, 17.11.2026):** Der Füller zeichnet auf dem iPad einen Tintenverlauf, der vom Druck abhängt. In der Web-App kommt ein dünner, gleichmäßiger Strich an, auch bei dick eingestellter Schrift.
+
+**Lead-Entscheidung:** Die Breite je Punkt kommt ins Format. Die Web-App zeichnet damit die Form, die PencilKit gezeichnet hat, statt sie aus dem Druck zu schätzen. Der Weg „nur kalibrieren“ ist verworfen: Er bräuchte Messungen am Gerät und bliebe eine Näherung.
+
+Ergänzt 08 §4 und §11.1/§11.3. Wo dieser Abschnitt älteren Stellen widerspricht, gilt dieser Abschnitt.
+
+### 23.1 Befund (Stand des Codes vom 17.11.2026)
+
+- **iPad** (`apps/ipad/Sources/Ink/InkPencilKit.swift`): Das Werkzeug kommt richtig an. `stroke.width` ist der Median von `max(size.width, size.height)` über die Punkte des Strichs. Je Punkt gehen nur `x, y, dt, force, azimuth, altitude` hinaus, die Größe je Punkt (`PKStrokePoint.size`) wird verworfen.
+- **Normierung** (`InkStrokeCodec.swift`): `force = Rohdruck / (25/6)`. Der Teiler ist geraten und nie am Gerät gemessen (Spike S3-U1).
+- **Web** (`apps/web/src/components/ink/render.ts`): `perfect-freehand` rechnet die Breite aus `force`. Beim Füller ist der Durchmesser `1,16 × width × force`, mindestens `0,116 × width`. Auf dem iPad ist der mittlere Durchmesser `width`. Im Web wäre er das nur, wenn `force` im Mittel bei etwa 0,86 läge. Liegt `force` wegen des geratenen Teilers meist bei 0,1 bis 0,25 (vermutet, nicht gemessen), ist der Strich im Web etwa drei- bis achtmal zu dünn und fast gleichmäßig. Das passt zum Bild des Owners.
+- **Core und Worker dekodieren keine Punkte.** Der Core prüft nur Länge und Endlichkeit (`services/core/src/sync/handlers/ink.ts`) und reicht die Bytes durch (`services/core/src/services/pages.ts`). Vorschaubilder, Export, Suche und `align.log` lesen keine Striche. Der Worker kennt `Stroke` nur als generierten Typ. Die Vorschaubilder des iPads kommen aus `PKDrawing`.
+
+### 23.2 Format: neues Feld `sizes`
+
+`Stroke` bekommt ein **optionales** Feld `sizes`. `points` bleibt unverändert bei 24 Byte je Punkt.
+
+```jsonc
+{
+  // … alle Felder wie bisher (08 §4.1) …
+  "points": "<base64>", // unverändert: n × 24 Byte
+  "sizes": "<base64>" // neu, optional: n × 8 Byte
+}
+```
+
+- **Inhalt:** je Punkt zwei `Float32` little-endian, hintereinander: `width`, `height`. Das sind die Werte von `PKStrokePoint.size` in pt, in derselben Einheit und im selben Koordinatensystem wie `x`/`y`, also **vor** `transform`.
+- **Zuordnung:** Der i-te Eintrag in `sizes` gehört zum i-ten Punkt in `points`. `sizes` hat genau so viele Einträge wie `points` Punkte.
+- **Werte:** endlich und ≥ 0. `0` ist erlaubt (auslaufende Spitze). Mindestens ein Wert im Strich ist > 0: `sizes` aus lauter Nullen ist ungültig (23.6, 23.8).
+- **Base64:** wie `points` ohne Zeilenumbrüche. 8 Byte je Punkt ergeben Padding, wenn die Punktzahl kein Vielfaches von 3 ist. Padding (`=`) ist darum erlaubt und dort Pflicht, wo Base64 es verlangt.
+- **Fehlt das Feld, ist es ein Strich im Format v1.** `sizes` ist nie `null`: Der Schlüssel fehlt oder trägt einen Wert. So bleiben alle bisherigen Beispiele und Testdaten gültig und byte-gleich.
+- **`width` bleibt Pflicht** und bleibt der Median von `max(width, height)` der Punkte. Leser, die `sizes` nicht kennen, zeichnen damit wie bisher.
+- **`bbox` bleibt wie bisher** (Rand = `width / 2`). Mit `sizes` kann ein Strich an dicken Stellen bis zur halben größten Punktbreite über `bbox` hinausragen. Kein Leser darf `bbox` als harte Zeichengrenze nehmen (heute tut es keiner).
+- **`force` bleibt** samt Normierung. Für die Breite braucht der Leser sie bei v2 nicht mehr.
+
+**Warum ein zweites Feld und kein Punkt mit 28 oder 32 Byte samt `point_format`?**
+
+1. **Eindeutig ohne Kennung.** v1 und v2 unterscheiden sich am Vorhandensein von `sizes`. Die Teilbarkeit der Länge entscheidet nichts.
+2. **`points` bleibt Byte für Byte gleich.** Der Abgleich des iPads vergleicht `points` als Text (`InkReconciler.isSame`). Mit einem neuen Punktformat wäre nach dem Update jeder alte Strich „geändert“. Jeder Abgleich (Reset, Wiederherstellung) schickte dann alle Striche neu. Dabei entstehen die Zeiten des Strichs neu und können von denen des Schreibens abweichen (23.7).
+3. **Kein Leser muss umgebaut werden, der die Breite nicht braucht:** Treffer-Suche im Rückblick, Fingerabdruck, Python-Referenz, bestehende Testdaten.
+4. **Das Schema bleibt einfach.** `points` behält sein Muster (Vielfache von 32 Zeichen). Ein Punktformat mit 28 Byte bräuchte `if/then` im Schema, das der Codegen für Zod und Swift nicht sauber abbildet.
+5. **Erweiterbar.** Weitere Werte je Punkt kämen später als weiteres optionales Feld dazu.
+
+**Warum Breite und Höhe?** `PKStrokePoint.size` ist ein `CGSize`. Ob Füller und Textmarker `width ≠ height` liefern (schräge Spitze), ist am Gerät nicht gemessen (Spike S3-U2). Mit beiden Werten lässt sich das später allein im Web nachziehen. Mit nur einem Wert wäre dafür eine weitere Formatänderung über iPad, Core und Web nötig. Kosten: 4 Byte je Punkt.
+
+**Keine Deckkraft je Punkt.** Geprüft und nicht aufgenommen: Der Web-Renderer füllt je Strich **einen** Pfad, damit Überlappungen bei durchscheinender Farbe nicht doppelt decken. Deckkraft, die sich im Strich ändert, kann er so nicht zeichnen. Die Körnung des Bleistifts bildet er ohnehin nicht nach. Die Deckkraft des Strichs steht weiter in `color` (Textmarker) und im Werkzeugstil (Bleistift). Braucht ein späterer Renderer sie, kommt sie als eigenes optionales Feld.
+
+### 23.3 Grenzen
+
+**Grenze des Formats (prüft der Core):**
+
+- **`points` und `sizes` zusammen höchstens 750 000 Byte** (roh, vor Base64). Grund wie bisher: Der Core nimmt Nachrichten bis 1 MiB an (§11). 750 000 Byte sind in Base64 1 000 000 Zeichen, der Rest bleibt für den Umschlag.
+- Daraus folgt: v1 höchstens 31 250 Punkte (unverändert), v2 höchstens **23 437 Punkte** (32 Byte je Punkt).
+- Die Grenze zählt Byte und nicht Punkte, weil die Nachrichtengröße der Grund ist und so eine Regel für beide Formate reicht.
+
+**Grenze beim Senden (iPad), strenger als das Format:**
+
+- Das iPad legt jede Nachricht über `SyncEngine.maxMessageBytes` (1 000 000 Byte, die ganze Nachricht als UTF-8) in die Fehlerablage (`message_too_large`). Dazu schreibt der Swift-Encoder (`newJSONEncoder`, ohne `.withoutEscapingSlashes`) jedes `/` als `\/`. Base64-Text wird dadurch länger: um etwa 1,6 %, wenn alle Zeichen gleich häufig sind, bei echten Punktdaten auch mehr. Ein Strich an der Formatgrenze (23 437 Punkte mit `sizes`, 999 980 Zeichen Base64) käme auf über 1 MB und ginge verloren.
+- **Regel 1, Punktgrenze:** Das iPad setzt `sizes` nur bei höchstens **20 000 Punkten** (`InkStrokeCodec.maxPointsWithSizes`). Das sind 640 000 Byte, in Base64 853 336 Zeichen. Bei 240 Abtastungen je Sekunde sind es gut 80 Sekunden ohne Absetzen.
+- **Regel 2, tatsächliche Größe (maßgeblich):** Beim Bauen der `stroke.add` misst das iPad die fertig kodierte Operation (`json.utf8.count`, also mit Umschlag und mit `\/`). Ist sie größer als `SyncEngine.maxMessageBytes − 50 000` (950 000 Byte) und trägt der Strich `sizes`, wird die Operation ohne `sizes` neu gebaut (v1). Die Reserve von 50 000 Byte deckt die spätere Zeitkorrektur (`InkOpBuilder.correct`, die Zahlen können länger werden) und den Abstand zur harten Grenze.
+- Regel 2 gilt für **jede** `stroke.add` des iPads: Schreiben, Lasso, Abgleich. Regel 1 erspart nur das doppelte Kodieren.
+- **`points` ist für jeden Strich identisch mit der v1-Kodierung.** Ausgedünnt wird wie bisher erst ab 31 250 Punkten, bei v2 also nie.
+- Die Obergrenze der Web-App (`MAX_POINTS = 50 000`) bleibt.
+
+**Bekannter Folgepunkt (eigenes Ticket #382, nicht Teil von §23):** v1 hat denselben Fehler schon heute. Ab etwa 28 000 bis 30 000 der erlaubten 31 250 Punkte (je nach Anteil von `/` im Base64) ist die kodierte `stroke.add` größer als `SyncEngine.maxMessageBytes`, und der Strich landet in der Fehlerablage. Regel 2 hilft dort nicht, weil es kein `sizes` zum Weglassen gibt. Die Lösung (kleinere Punktgrenze für v1, Encoder ohne `\/` oder höhere Grenze der `SyncEngine`) klärt das eigene Ticket.
+
+### 23.4 Fähigkeit des Core: `welcome.features`
+
+`SyncWelcome` bekommt ein **optionales** Feld `features`: eine Liste von Zeichenketten, jede höchstens einmal. Der Core sendet `["stroke_sizes"]`. Fehlt das Feld, gilt es als leer. Clients ignorieren unbekannte Einträge.
+
+Grund: `Stroke` ist streng (`additionalProperties: false`). Ein Core ohne dieses Update lehnt jeden Strich mit `sizes` als `message_invalid` ab (`retryable = false`), und der Strich landet auf dem iPad in der Fehlerablage. Das iPad darf `sizes` darum nur senden, wenn der Core die Fähigkeit meldet.
+
+| iPad | Core | Verhalten |
+|---|---|---|
+| alt (v1) | neu | Striche ohne `sizes` werden angenommen und wie bisher gezeichnet |
+| neu | alt (kein `features`) | Das iPad sendet ohne `sizes`. Kein Fehler, Darstellung wie bisher |
+| neu | neu | Das iPad sendet `sizes`, das Web zeichnet die Breite je Punkt |
+| alt | neu, Seite enthält v2-Striche | Der Swift-Decoder ignoriert das unbekannte Feld. `InkReconciler.isSame` vergleicht `sizes` nicht, es entsteht kein Neusenden |
+
+- **Ein geöffneter Web-Tab mit altem Stand** prüft streng und kennt weder `features` noch `sizes`. Nach dem Update des Core muss der Tab neu geladen werden: Sonst fällt das `welcome` durch die Prüfung, und Striche mit `sizes` werden übersprungen (`LenientPageStrokesSchema`, `op.skipped`). Für Striche gilt das bei jeder Ergänzung an strengen Typen und bleibt so. Beim `welcome` ist es schlimmer: Ein `welcome`, das durch die Prüfung fällt, zählt als nicht angekommen, und der Tab verbindet nach der Wartezeit endlos neu (`apps/web/src/lib/sync/client.ts`, `handleRaw`). **Ab V2-2 liest der Web-Client das `welcome` nachsichtig:** Unbekannte Schlüssel auf der obersten Ebene werden vor der Prüfung entfernt. Künftige Ergänzungen am `welcome` zwingen dann keinen Tab mehr zum Neuladen. Für diese Ergänzung (`features`) hilft das alten Tabs noch nicht.
+- **Der Core merkt sich keine Fähigkeiten des Clients.** `hello` bleibt unverändert.
+- **Zurück auf einen älteren Core** nach gespeicherten v2-Strichen ist nicht vorgesehen. Die Migration wird nicht zurückgerollt.
+
+### 23.5 Schemas (`packages/schemas`)
+
+- `ink.schema.json`, `Stroke`: neue optionale Eigenschaft `sizes`, nicht in `required`.
+  - `type: string`, `minLength: 12`, `pattern: ^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$`
+  - Beschreibung nach 23.2. Die Beschreibungen von `Stroke` und `points` bekommen den Verweis auf `sizes`. Das Muster von `points` bleibt.
+  - Ob `sizes` zur Punktzahl passt, prüft das Schema nicht. Das prüfen Core (23.6) und Web (23.8).
+- `sync.schema.json`, `SyncWelcome`: neue optionale Eigenschaft `features` (`type: array`, `items: { type: string, minLength: 1 }`, `uniqueItems: true`).
+- **Beispiele** (`packages/schemas/examples`):
+  - gültig: `Stroke.mit-sizes.json` (3 Punkte, 24 Byte `sizes`, ohne Padding), `Stroke.mit-sizes-padding.json` (1 Punkt, 8 Byte, endet auf `=`), `StrokeAddOp.mit-sizes.json`, `PageStrokes.gemischt.json` (ein Strich mit, einer ohne `sizes`), `SyncWelcome.features.json`.
+  - ungültig: `Stroke.sizes-null.json`, `Stroke.sizes-leer.json` (`""`), `Stroke.sizes-kein-base64.json`, `SyncWelcome.features-doppelt.json`.
+- **Testdaten** (`tests/fixtures/strokes`): neue Datei `08-fueller-sizes.json` mit Füller, Kugelschreiber, Bleistift und Textmarker samt `sizes`. Darin: ein Füller mit deutlichem Verlauf, mindestens ein Strich mit `width ≠ height`, einer mit Größe 0 am Ende, einer mit skalierender `transform`. `stroke_format.py`, `erzeugen.py`, `pruefen.py`, `vorschau.py` und `README.md` lernen `sizes`. Die Dateien 01 bis 07 bleiben byte-gleich.
+- **Codegen:** `pnpm schemas:gen`, generierte Dateien committen (`packages/schemas/generated/**`, `packages/shared/src/generated/**`, `packages/schemas/python/sg_schemas/**`). `pnpm schemas:check` grün.
+- **Swift:** `Schemas.swift` bekommt `Stroke.sizes: String?` und `SyncWelcome.features: [String]?`. Der Swift-Contract-Check (`packages/schemas/swift-support/check.sh`) liest alle Beispiele und `tests/fixtures/strokes/*.json` und schreibt sie identisch zurück. Ein fehlendes `sizes` darf beim Kodieren nicht als `null` erscheinen.
+- **Fallstrick:** Die iPad-App kompiliert `Schemas.swift` direkt (`apps/ipad/project.yml`). `quicktype` erzeugt `let`-Felder, der Initialisierer von `Stroke` verlangt das neue Argument darum sofort. Ticket V2-1 ergänzt an allen Stellen, die `Stroke(…)` bauen, `sizes: nil` (heute: `InkStrokeCodec.swift`, `Tests/InkReconcilerProjectionTests.swift`, `Tests/SyncOutboxTests.swift`, `Tests/SyncFakes.swift`). Mehr ändert V2-1 am iPad nicht. Der CI-Job `ipad` muss für diesen PR laufen und grün sein.
+
+### 23.6 Core
+
+- **Migration** (nächste freie Nummer, heute `0013`): `ALTER TABLE stroke ADD COLUMN sizes bytea`, nullbar und ohne Vorgabe. Bestehende Zeilen bleiben `NULL` und damit v1. Alte Daten werden nicht umgerechnet. `services/core/src/db/schema/ink.ts` entsprechend.
+- **Prüfung in `stroke.add`** (`checkStroke`): `points` wie bisher. Ist `sizes` vorhanden, folgt zusätzlich `message_invalid` (`retryable = false`) bei:
+  - kein gültiges Base64 oder leer,
+  - Länge ≠ Punktzahl × 8 Byte,
+  - ein Wert ist NaN, unendlich oder negativ,
+  - alle Werte sind 0 (das iPad sendet so etwas nie, 23.7),
+  - `points` und `sizes` zusammen über 750 000 Byte.
+- **Speichern:** `sizes` als Bytes in `stroke.sizes`. `stroke.add` bleibt ein Upsert, der den ganzen Strich ersetzt: **Fehlt `sizes` in der Operation, wird die Spalte `NULL`**, auch wenn vorher ein Wert dort stand. Es wird nichts zusammengeführt.
+  - **Hinweis für die Umsetzung:** `strokeAdd` nutzt dasselbe `values`-Objekt für `insert` und für `set` im `onConflictDoUpdate`. Drizzle lässt einen Schlüssel mit `undefined` im `set` aus, die Spalte behielte dann den alten Wert. Ohne `sizes` in der Operation muss dort ausdrücklich `sizes: null` stehen. Test 3 unten prüft genau das.
+  - **Optional:** ein CHECK in der Migration, `sizes IS NULL OR octet_length(sizes) * 3 = octet_length(points)`. Er sichert die Zuordnung zu `points` auch gegen Fehler außerhalb von `checkStroke`.
+- **Lesen** (`toApiStroke`, genutzt nur von `getPageStrokes`, also `GET /pages/{id}/strokes`): `sizes` nur ausgeben, wenn die Spalte nicht `NULL` ist. Sonst fehlt der Schlüssel. `PageDetail` enthält keine Striche.
+- **Strom:** `sync_op.data` trägt die Operation unverändert, also mit `sizes`. Wiederholungen (`op_id`) vergleichen `data` wie bisher.
+- **`welcome`:** `features: ["stroke_sizes"]` (`services/core/src/sync/connection.ts`).
+- Papierkorb, Backup, Wiederherstellung und `maintenance.nightly` brauchen keine Änderung. Sie lesen keine Punkte, und die Spalte reist mit der Tabelle.
+- §11.3, Zeile `stroke.add`, gilt mit diesen Ergänzungen.
+
+### 23.7 iPad
+
+- **Erfassen** (`InkPencilKit.sample`): `InkPointSample` bekommt `width` und `height` aus `point.size`. `baseWidth` (Median) bleibt.
+- **Kodieren** (`InkStrokeCodec`): neue Option `InkCodecOptions.includeSizes` (Vorgabe `false`). `encode` setzt `sizes` nur, wenn **alle** Bedingungen gelten. Sonst entsteht ein v1-Strich:
+  - `includeSizes` ist `true`,
+  - der Strich hat höchstens 20 000 Punkte (`maxPointsWithSizes`, 23.3 Regel 1),
+  - alle Breiten und Höhen sind endlich (auch als `Float`) und ≥ 0, und mindestens ein Wert ist > 0.
+- **Größe der Operation** (`InkOpBuilder.ops`, 23.3 Regel 2): Ist die kodierte `stroke.add` größer als `SyncEngine.maxMessageBytes − 50 000`, baut `InkOpBuilder` sie ohne `sizes` neu (gleiche `op_id`, sonst gleicher Strich). Gemessen wird die Operation, die in die Warteschlange geht, nicht eine Schätzung aus der Punktzahl.
+- **`points` darf sich durch dieses Ticket für keinen Strich ändern** (gleiche Bytes wie vorher). Die Normierung von `force` bleibt.
+- **Fähigkeit:** Die `SyncEngine` liest `welcome.features` und merkt sich dauerhaft je gekoppeltem Mac, ob `stroke_sizes` zuletzt gemeldet wurde. Gespeichert wird der Wert in `UserDefaults` neben den Kopplungsdaten (`apps/ipad/Sources/Core/PairedMacStore.swift`, eigener Schlüssel `pairedMac.strokeSizes`); `clearPairedMac()` löscht ihn mit. Vor dem ersten `welcome` und nach dem Entkoppeln gilt `false`. Offline entstandene Striche nutzen den zuletzt gemerkten Wert.
+- **Weg zum Modell:** `InkPageModel` bekommt eine Eigenschaft `includeSizes` (Vorgabe `false`) und kodiert damit. Gesetzt wird sie dort, wo ein `InkPageModel` entsteht, aus dem gemerkten Wert der `SyncEngine`: `InkLibraryService.swift` (heute Zeilen 433, 461 und 1098) und `InkPageView.swift` (heute Zeile 835). An diesen Stellen ändert V2-3 nur diese Zuweisung. **Keine globale Variable.** Ändert sich der Wert, während eine Seite offen ist, gilt der neue Wert spätestens beim nächsten Öffnen der Seite.
+- **`InkReconciler.isSame` bleibt unverändert und vergleicht `sizes` nicht.** Begründung: Gälte ein alter Strich wegen fehlender `sizes` als geändert, schickte jeder Abgleich ihn neu. `neutralStrokes()` kodiert dabei zwar mit dem Sitzungsstart **der Seite** (`binding.sessionStartMS`, `InkLibraryService.reconcileForPass`) und nicht mit der gerade laufenden Session. Die Zeiten wären trotzdem nicht sicher die des Schreibens:
+  - `created_at` entsteht neu aus der lokalen `creationDate` plus dem **heutigen** Uhrversatz (`InkOpBuilder.correct`). Der Versatz beim Schreiben kann ein anderer gewesen sein. `t_start_ms` und `t_end_ms` folgen aus `created_at` und verschieben sich mit.
+  - `sessionStartMS` der Seite kann `nil` sein, z. B. nachdem der Core der Seite eine andere Session gegeben hat (`InkLibraryService`, Zusammenführen der Seite). Dann gingen `t_start_ms` und `t_end_ms` als `null` hinaus, und der Strich verlöre seine Zuordnung im Rückblick.
+
+  Das Nachrüsten alter Striche ist darum ein eigenes Ticket mit eigener Regel (unten).
+- **Lasso, Umfärben, Skalieren** eines alten Strichs senden wie bisher `stroke.add` mit gleicher `client_id` und unveränderter Zeit, jetzt mit `sizes`. Der Strich ist damit nachgerüstet.
+
+**Alte Striche nachrüsten (Ticket V2-4, eigener PR, zurückgestellt):** Die `PKDrawing` auf dem iPad enthält die Größen aller alten Striche. Das iPad kann sie nachliefern, ohne dass etwas geschätzt wird.
+
+> **Lead-Entscheidung: V2-4 ist zurückgestellt.** Es wird nur umgesetzt, wenn der Owner nach V2-3 und V2-5 alte Seiten noch sichtbar falsch findet (23.10). Bis dahin zeichnet das Web alte Striche mit der Schätzung aus V2-5. Wird V2-4 umgesetzt, dann nur mit den Regeln „Zeiten“ und „Geräteversatz“ unten. Ohne sie darf das Ticket nicht starten.
+
+- **Auslöser:** Beim ersten `welcome` mit `stroke_sizes` je `db_epoch` markiert das iPad alle Seiten für den Abgleich (`needsReconcile`) und merkt sich die `db_epoch`. Der vorhandene Hintergrund-Durchgang (UX-46) arbeitet sie ab.
+- **Regel in `InkReconciler.plan`**, nur wenn der Core `stroke_sizes` meldet: Gilt ein lokaler Strich nach `isSame` als gleich, hat der Strich am Core kein `sizes` und der lokale schon, dann entsteht ein Nachrüst-Upsert mit dem lokalen Strich, **aber mit `created_at`, `t_start_ms` und `t_end_ms` vom Strich des Core**. Der Plan führt ihn als eigene Art von Änderung (z. B. `InkStrokeChange.retrofit`), getrennt vom normalen `upsert`.
+- **Zeiten (Pflicht):** Der normale Weg taugt dafür nicht. `SyncEngine.reconcile` reiht über `InkOpBuilder.ops` ein, dort mit `clockUncertain: true`. Danach verschiebt `InkOpBuilder.correct` `created_at` um den Uhrversatz und bildet `t_start_ms` aus dem Sitzungsstart neu. Die Zeiten des Core wären damit wieder verändert. Nachrüst-Upserts gehen darum **als bereits korrigiert** in die Warteschlange:
+  - `clock_uncertain = false` in der Operation und im Eintrag der Warteschlange,
+  - `sessionStartMS = nil` im Eintrag,
+  - keine Korrektur: weder `corrected` beim Einreihen noch `correct` beim Senden fasst den Strich an,
+  - `at` = lokale Zeit plus bekannter Uhrversatz. Ist der Versatz unbekannt, plant der Abgleich in diesem Durchgang keine Nachrüst-Upserts, und die Seite bleibt fürs Nachrüsten markiert.
+- **Geräteversatz (Pflicht):** Der Core nimmt für den Versatz eines Strichs das Gerät der **letzten** `stroke.add` (`strokeOffsets`, `services/core/src/services/session-time.ts`, §9.3). Ein Nachrüst-Upsert von einem neu gekoppelten iPad hat eine andere `device_id` ohne Eintrag in `start_offsets`. Der Versatz des Strichs entfiele, und der Rückblick ordnete ihn falsch zu. Darum: **V2-4 rüstet keine Striche von Seiten nach, deren Session `start_offsets` hat.** Das iPad erkennt das an der Antwort des Abgleichs: Ist `stroke_offsets_ms` in `GET /pages/{id}/strokes` nicht leer, entsteht für die ganze Seite kein Nachrüst-Upsert. Diese Seiten bleiben v1 (Schätzung aus V2-5). **Offen vor dem Start von V2-4:** Die Erkennung sieht nur, dass ein Versatz *wegfällt*. Ein Versatz kann auch *dazukommen*: Hat das nachrüstende iPad selbst einen Eintrag ungleich 0 in `start_offsets` der Session, die Striche der Seite stammen aber von einem Gerät ohne Eintrag, ist `stroke_offsets_ms` leer, und die nachgerüsteten Striche bekämen den Versatz des iPads. Bevor V2-4 beauftragt wird, muss die Regel auch diesen Fall ausschließen (z. B. über einen Eintrag des eigenen Geräts in der Antwort des Abgleichs).
+- **Größe:** Auch Nachrüst-Upserts folgen 23.3 Regel 2. Fällt `sizes` dabei weg, entsteht keine Operation. Der Plan darf einen solchen Strich nicht bei jedem Abgleich neu versuchen.
+- Unlesbare Seiten und Seiten, die es auf dem iPad nicht mehr gibt, bleiben v1.
+- **Kosten:** Jeder nachgerüstete Strich ist eine neue Operation im Strom. `sync_op` wächst einmalig etwa um die Größe aller vorhandenen Striche.
+- **Bekannte Unschärfen:**
+  - Der Upsert setzt `stroke.clock_uncertain` auf `false`, auch wenn dort vorher `true` stand.
+  - Die Erkennung über `stroke_offsets_ms` sieht nur Striche mit Zeit (`t_start_ms`) und einem Versatz ungleich 0. Hat die Session einen Eintrag in `start_offsets`, die Seite aber keinen betroffenen Strich, wird nachgerüstet. Dort gibt es keinen Versatz, der entfallen könnte; ein *hinzukommender* Versatz ist damit aber nicht ausgeschlossen (siehe „Geräteversatz“, offen vor V2-4).
+  - Nach einem Nachrüst-Upsert ist das nachrüstende iPad das Gerät der letzten `stroke.add`. Bekommt die Session **später** einen Eintrag in `start_offsets` für dieses Gerät, gilt er auch für die nachgerüsteten Striche, selbst wenn ein anderes Gerät sie geschrieben hat.
+
+### 23.8 Web-Renderer
+
+**Dekodieren** (`apps/web/src/components/ink/stroke.ts`):
+
+- `DecodedStroke` bekommt `diam: Float32Array | null`: Durchmesser je Punkt in pt nach `transform`, `null` bei v1.
+- Durchmesser = `max(width, height) × matrixScale(transform)`, begrenzt auf 0,1 pt bis `MAX_STROKE_WIDTH`.
+- Passt `sizes` nicht (kein Base64, Länge ≠ Punktzahl × 8, NaN, unendlich, negativ, lauter Nullen), wird der Strich **als v1 gezeichnet** und nicht verworfen. `diam` ist dann `null`.
+- `pts`, `width`, `count` und `DECODED_STRIDE` bleiben. Alle anderen Leser (`stroke-hit.ts`, `review-notes.ts`) bleiben unberührt.
+
+**Zeichnen** (`render.ts`): Hat der Strich `diam`, zeichnet der Renderer die Form direkt aus den Durchmessern, für **alle** Werkzeuge. `perfect-freehand` läuft dann nicht. Ohne `diam` bleibt alles wie bisher.
+
+Die Form ist eine Kette aus Kapseln, als Vereinigung einfacher Teilflächen in **einem** Pfad:
+
+1. **Punkte:** Aufeinanderfolgende Punkte mit Abstand unter 0,01 pt zusammenfassen (der größere Durchmesser gewinnt).
+2. **Verdichten:** Ist ein Abschnitt länger als 1,5 pt, Zwischenpunkte auf einer Catmull-Rom-Kurve durch die Nachbarpunkte einfügen (Durchmesser linear dazwischen). Die Zahl ist begrenzt, sonst ergäben große Koordinatensprünge Hunderttausende Punkte:
+   - je Abschnitt `k = min(64, ceil(Länge / 1,5) − 1)` Zwischenpunkte,
+   - je Strich insgesamt höchstens 5 000 Zwischenpunkte. Ergäbe die Summe mehr, werden alle `k` mit demselben Faktor verkleinert (abgerundet),
+   - bei mehr als 5 000 Punkten im Strich entfällt das Verdichten.
+3. **Scheiben:** je Punkt ein Kreis mit Radius `diam / 2`. Die Scheiben bilden runde Verbindungen und runde Enden. Vor jedem `arc` steht ein `moveTo(x + r, y)`, damit kein Verbindungsstrich vom vorigen Teilpfad zum Kreis entsteht. Danach `closePath()`.
+4. **Trapeze:** je Abschnitt ein Viereck zwischen den **äußeren Tangenten** der beiden Kreise, nicht entlang der Normalen des Abschnitts. Versetzt man nur entlang der Normalen, liegt das Viereck bei wechselndem Radius innerhalb der Kreise, und der Umriss bekommt kleine Einbuchtungen. Mit `u` = Einheitsvektor von Punkt 0 zu Punkt 1, `n` = dessen Normale, `d` = Abstand, `r0`, `r1` = Radien:
+   - `s = (r0 − r1) / d`, `c = sqrt(1 − s²)`,
+   - Ecken: `P0 + r0 · (s·u ± c·n)` und `P1 + r1 · (s·u ± c·n)`,
+   - ist `d ≤ |r0 − r1|`, liegt ein Kreis im anderen. Dann entfällt das Trapez.
+5. **Umlaufsinn:** Alle Teilflächen haben denselben Umlaufsinn. Die Trapeze werden so geordnet, dass die Summe `Σ (x_i · y_{i+1} − x_{i+1} · y_i)` positiv ist, die Kreise entstehen mit `ctx.arc(…, false)`. Mit der Füllregel `nonzero` ergibt das die Vereinigung: keine Löcher an engen Kurven und keine doppelte Deckung bei durchscheinender Farbe.
+6. **Ein `fill()` je Strich**, wie bisher.
+
+- **Textmarker** (`cap: false`): keine Scheibe am ersten und am letzten Punkt, damit die Enden stumpf bleiben. Ein Textmarker aus einem einzigen Punkt wird als Quadrat mit der Kantenlänge des Durchmessers gezeichnet.
+- **Ein einzelner Punkt** sonst: eine Scheibe.
+- **Deckkraft und Farbe** wie bisher (`color`, `ToolStyle.alpha`). `size`, `thinning`, `floor` und `taper` gelten bei v2 nicht: Auslaufende Enden stecken schon in den Größen.
+- **`strokeBounds`:** Rand bei v2 = halber größter Durchmesser des Strichs + 2 pt.
+- Das Ergebnis wird je Strich einmal berechnet und gemerkt, wie `outlines`.
+
+**Annahme A1 (nicht am Gerät gemessen):** `max(width, height)` ist der sichtbare Durchmesser, und `size` ist in pt. Dieselbe Annahme steckt heute schon in `stroke.width`. Zeigt der Vergleich am Gerät (23.10) beim Füller oder Textmarker eine Breite, die von der Richtung abhängt, folgt ein Web-Ticket, das `width`, `height` und `azimuth` als schräge Spitze auswertet. Das Format reicht dafür.
+
+**Schätzung für v1-Striche (Ticket V2-5, eigener PR, ausdrücklich eine Schätzung):** Striche ohne `sizes` bleiben sonst dünn. Das betrifft alles, was vor V2-3 geschrieben wurde, denn das Nachrüsten (V2-4) ist zurückgestellt. V2-5 kommt darum **vor** dem iPad-Ticket V2-3 (23.9).
+
+- Bekannt ist: `width` ist der Median des echten Durchmessers. Unbekannt ist nur der Maßstab von `force`.
+- Regel für `pen`, `fountain`, `pencil`: `m` = Median von `force` über die Punkte mit `force > 0`. Druck für `perfect-freehand` = `clamp(0,5 × force / m, 0, 1)`. `ToolStyle.size` wird für diese drei Werkzeuge `1,0`. Gibt es keinen Punkt mit `force > 0`, ist der Druck überall 0,5.
+- Wirkung: Beim mittleren Druck ist der Strich genau `width` breit, **unabhängig vom geratenen Teiler**. `thinning`, `floor` und `taper` bleiben.
+- **Geschätzt bleibt**, wie stark die Breite um diesen Mittelwert schwankt (hier: linear mit dem Druck). Der Durchmesser ist `width × (1 − thinning × (1 − 2 × Druck))`, beim Druck 1 also `(1 + thinning) × width`: Füller bis `2 × width`, Bleistift bis `1,7 × width`. Wo das iPad `force` bei 1 abgeschnitten hat, fehlt die Information.
+- **Kugelschreiber (`pen`) schwankt weniger:** Mit `thinning` 0,85 käme er auf bis zu `1,85 × width`. Das passt nicht zu einem Stift, der auf dem iPad fast gleichmäßig schreibt. Für `pen` wird der Druck darum zusätzlich auf 0,3 bis 0,7 begrenzt. Der Durchmesser bleibt so zwischen `0,66 × width` und `1,34 × width`.
+- `monoline` und `marker` bleiben unverändert. Dort ist der Durchmesser schon `width`.
+- Die künstlichen Testdaten 01 bis 07 werden dadurch etwa um den Faktor 1,6 dicker. Tests mit festen Breiten werden angepasst.
+
+### 23.9 Tickets und Besitz
+
+**Reihenfolge (Lead-Entscheidung): V2-1 → V2-2 → V2-5 → V2-3.** Erst die Leser, dann der Schreiber. Die Web-Schätzung für v1 (V2-5) kommt vor dem iPad-Ticket, weil sie alle vorhandenen Seiten sofort verbessert. **V2-4 ist zurückgestellt** (23.7) und steht nicht in der Reihe.
+
+Die Dateien der Tickets überschneiden sich nicht, außer bei V2-2/V2-5 und bei V2-3/V2-4. Diese Paare laufen nacheinander.
+
+| Ticket | Inhalt | Besitzt (Dateien) | Abhängig von |
+|---|---|---|---|
+| **V2-1** (Schemas + Core) | 23.4 bis 23.6: `Stroke.sizes`, `SyncWelcome.features`, Beispiele, Testdaten 08, Codegen, Migration, Prüfung, Speichern, Lesen, `welcome`. Am iPad nur `sizes: nil` (23.5, Fallstrick) | `packages/schemas/**`, `packages/shared/src/generated/**`, `tests/fixtures/strokes/**`, `services/core/src/db/schema/ink.ts`, `services/core/drizzle/**`, `services/core/src/sync/handlers/ink.ts`, `services/core/src/services/pages.ts`, in `services/core/src/sync/connection.ts` nur `features` im `welcome`, Tests des Core, in `apps/web/test/ink-stroke.test.ts` nur die Zählung der Testdaten (Dateien und Striche). Am iPad nur die vier Stellen aus 23.5 | – |
+| **V2-2** (Web, v2 zeichnen) | 23.8, Dekodieren und Zeichnen. Dazu `welcome` nachsichtig lesen (23.4) | `apps/web/src/components/ink/{stroke,render}.ts`, `apps/web/test/ink-{stroke,render}.test.*`, `apps/web/test/ink-fixtures.ts` (liest alle Dateien, Kommentar „7 Dateien, 299 Striche“ anpassen), in `apps/web/src/lib/sync/client.ts` nur das Lesen des `welcome`, `apps/web/test/sync-client.test.ts`, in `apps/web/scripts/ink-perf/` nur die Option für `sizes` | V2-1 (gegen die Testdaten 08 baubar, Merge nach V2-1) |
+| **V2-5** (Web, Schätzung für v1) | 23.8, Absatz „Schätzung für v1-Striche“ | `apps/web/src/components/ink/{stroke,render}.ts`, `apps/web/test/ink-{stroke,render}.test.*` | V2-2 |
+| **V2-3** (iPad, Schreiber) | 23.7 ohne Nachrüsten: Erfassen, Kodieren, Größe der Operation, Fähigkeit | `apps/ipad/Sources/Ink/{InkPencilKit,InkStrokeCodec,InkPageModel}.swift`, in `apps/ipad/Sources/Sync/InkOpBuilder.swift` nur die Größenregel (23.3 Regel 2), in `apps/ipad/Sources/Sync/SyncEngine.swift` nur `welcome.features` und der gemerkte Wert, in `apps/ipad/Sources/Core/PairedMacStore.swift` nur der Schlüssel `pairedMac.strokeSizes`, in `apps/ipad/Sources/Library/InkLibraryService.swift` und `apps/ipad/Sources/Ink/InkPageView.swift` nur die Zuweisung von `includeSizes`, Tests | V2-1, V2-2 und V2-5 gemergt **und auf dem Mac des Owners eingespielt** |
+| **V2-4** (iPad, alte Striche nachrüsten) **– zurückgestellt** | 23.7, Absatz „Alte Striche nachrüsten“, samt den Regeln „Zeiten“ und „Geräteversatz“ | `apps/ipad/Sources/Sync/{InkReconciler,InkOpBuilder}.swift`, in `apps/ipad/Sources/Ink/InkPageModel.swift` nur die neue Art von `InkStrokeChange`, in `SyncEngine.swift`, `Library/InkLibraryService.swift` und `Library/InkLibraryStore.swift` nur Auslöser, Einreihen der Nachrüst-Upserts und gemerkte `db_epoch`, Tests | V2-3 und V2-5, dazu die Entscheidung des Owners (23.10) |
+
+**Modell** (`KOLLABORATION.md` §4): Den Code aller fünf Tickets schreibt **Sonnet 5.5** nach diesem Abschnitt. Das Review macht je ein frischer **Opus 5.5**-Subagent:
+
+- V2-1, V2-3, V2-4: **Stufe A** (Sync-Protokoll, Migration, iPad-Daten). V2-4 (falls es kommt) zusätzlich mit der Gegenprobe „Sitzungszeiten bleiben erhalten“.
+- V2-2, V2-5: **Stufe B**. Es ist Darstellung mit Logik, darum Opus und nicht Sonnet. Das Review von V2-2 misst zusätzlich im echten Browser (unten).
+- Diesen Abschnitt prüft vor der Umsetzung ein frischer Opus-Subagent (Vertrag).
+
+**Akzeptanzkriterien und Tests**
+
+Für alle Tickets: `pnpm typecheck`, `pnpm lint`, `pnpm format:check` und die Tests des betroffenen Bausteins grün.
+
+- **V2-1**
+  - `pnpm schemas:check` grün. Contract-Tests (`packages/schemas/test`) mit allen neuen Beispielen grün. Swift-Contract-Check grün. CI-Job `ipad` grün.
+  - Testdaten 01 bis 07 unverändert (`git diff` leer). `pruefen.py` grün für 01 bis 08.
+  - Core, `stroke.add`:
+    1. Ohne `sizes` wie bisher: Spalte `NULL`, REST ohne Schlüssel `sizes`.
+    2. Mit `sizes`: gespeichert, REST liefert denselben Base64-Text.
+    3. Upsert ohne `sizes` auf einen Strich mit `sizes`: Spalte danach `NULL` (in der Datenbank geprüft, nicht nur über REST).
+    4. Je ein Test für jede Ablehnung aus 23.6, auch für `sizes` aus lauter Nullen.
+    5. Grenze: 23 437 Punkte mit `sizes` angenommen, 23 438 abgelehnt, 31 250 ohne `sizes` angenommen.
+    6. Wiederholung derselben `op_id` mit `sizes` ist idempotent.
+  - `welcome` enthält `features: ["stroke_sizes"]`.
+  - Migration: läuft auf einer Datenbank mit vorhandenen Strichen. Diese bleiben lesbar und ohne `sizes`.
+  - Die Tests der Web-App bleiben grün: `apps/web/test/ink-fixtures.ts` liest alle Dateien aus `tests/fixtures/strokes`, also auch die neue Datei 08. Die festen Zählungen in `apps/web/test/ink-stroke.test.ts` (`toHaveLength(7)`, `toHaveLength(299)`) passt V2-1 an die neue Zahl an.
+- **V2-2**
+  - Dekodieren: `diam` stimmt für die Identität und für eine skalierende `transform`. Jede Art kaputter `sizes` (auch lauter Nullen) ergibt `diam = null` und einen gezeichneten v1-Strich.
+  - Form:
+    1. Alle Teilflächen haben positiven Umlaufsinn.
+    2. Gerader Strich, 100 pt lang, mit Durchmessern von 2 auf 6 pt: Die Form ist an Anfang, Mitte und Ende 2, 4 und 6 pt breit (± 0,1). Die Ecken der Trapeze liegen auf den Kreisen (äußere Tangenten), der Umriss hat zwischen zwei Punkten mit verschiedenem Radius keine Einbuchtung.
+    3. Spitzkehre (180°) ohne Fehler, die Form deckt den Wendepunkt.
+    4. Ein Punkt: Kreis, beim Textmarker Quadrat.
+    5. Textmarker: Enden stumpf.
+    6. Größe 0 am Ende ohne Fehler.
+    7. Vor jedem `arc` steht ein `moveTo` auf den Startpunkt des Kreises.
+    8. Verdichten begrenzt: Ein Strich aus zwei Punkten mit 100 000 pt Abstand bekommt höchstens 64 Zwischenpunkte. Ein Strich mit 1 000 langen Abschnitten bekommt insgesamt höchstens 5 000.
+  - Ein `fill()` je Strich. `perfect-freehand` wird für v2 nicht aufgerufen.
+  - v1-Striche ergeben denselben Umriss wie vor dem Ticket (Testdaten 01 bis 07).
+  - `strokeBounds` schließt die dickste Stelle ein. Die Teilzeichnung (`redrawRegion`) lässt keine Reste eines v2-Strichs stehen.
+  - `apps/web/test/ink-fixtures.ts`: Der Kommentar mit der Zahl der Dateien und Striche stimmt wieder. Tests, die „v1 unverändert“ prüfen, nehmen nur die Dateien 01 bis 07.
+  - `welcome` mit einem unbekannten Schlüssel auf der obersten Ebene wird angenommen (kein Neuverbinden). Ein `welcome` mit kaputtem bekanntem Feld fällt weiter durch.
+  - Zeit, Stufe 1 (Unit-Test): 300 v2-Striche bleiben im Zeitrahmen des vorhandenen Tests („300 Striche“, `ink-render.test.tsx`). Datei 08 hat nur wenige Striche. Der Test bildet die 300 selbst: Er wiederholt die Striche aus Datei 08 mit neuer `client_id` und verschobener `transform`. Es entsteht dafür keine weitere Testdatei. **Dieser Test misst mit dem Canvas-Mock nur das Bauen der Pfade**, nicht das Füllen.
+  - Zeit, Stufe 2 (echter Browser, beim Review von V2-2): Gemessen wird mit dem vorhandenen Skript `apps/web/scripts/ink-perf/measure.cjs` (Issue #79, Chromium, Standard 1 500 Striche, p95 je Frame bei Zoom 1 und 2). V2-2 ergänzt dort nur eine Option, die die Striche mit bzw. ohne `sizes` erzeugt. Der Reviewer misst beide Varianten. Richtwert: v2 hält dasselbe Budget wie das Skript (16,7 ms p95) bzw. ist höchstens 1,5-mal so langsam wie v1, falls v1 das Budget schon reißt. Die Messwerte stehen im Review. Kann der Reviewer keinen Browser starten, steht das im PR unter „Offene Punkte“, und der Owner prüft es nach 23.10.
+- **V2-3**
+  - `points` ist in den vorhandenen Codec-Tests byte-gleich wie vorher, mit und ohne `includeSizes`.
+  - `sizes`: Reihenfolge und Werte stimmen, Padding richtig (1, 2 und 3 Punkte). Der Rückweg `unpackSizes` ergibt die Eingabe.
+  - Kein `sizes` bei: `includeSizes = false`, 20 001 Punkten, NaN, negativer Größe, lauter Nullen. Mit 20 000 Punkten entsteht `sizes`.
+  - Größe der Operation (`InkOpBuilder.ops`):
+    1. Ein Strich mit 20 000 Punkten und `sizes` ergibt eine Operation unter `SyncEngine.maxMessageBytes`, auch nach `correct` mit einem großen Uhrversatz.
+    2. Ein Strich, dessen Base64 sehr viele `/` enthält (künstliche Werte) und dessen Operation mit `sizes` über 950 000 Byte läge, geht ohne `sizes` in die Warteschlange. `points`, `client_id` und Zeiten sind dieselben wie mit `sizes`.
+    3. Gemessen wird `json.utf8.count` der Operation. Der Test prüft, dass `\/` mitgezählt ist.
+    4. Keine `stroke.add` mit `sizes` landet wegen `message_too_large` in der Fehlerablage (Test über die `SyncEngine` mit dem Strich aus 2).
+  - `InkPageModel.includeSizes` kommt an allen Stellen, die ein Modell anlegen, aus dem gemerkten Wert der `SyncEngine`. Es gibt keine globale Variable.
+  - `welcome` ohne `features` ergibt v1, mit `["stroke_sizes", "unbekannt"]` v2. Der Wert übersteht einen Neustart der App und fällt beim Entkoppeln.
+  - `InkReconciler.isSame`: Ein lokaler Strich mit `sizes` und derselbe Strich ohne `sizes` gelten als gleich, `plan` ergibt keine Änderung.
+- **V2-4** (zurückgestellt)
+  - `plan`: gleicher Strich, am Core ohne `sizes`, lokal mit. Es entsteht genau ein Nachrüst-Upsert mit dem lokalen `sizes` und den **Zeiten des Core**. Test mit abweichender lokaler Sitzungszeit und mit lokalem `t_start_ms = null`.
+  - **Zeiten über den ganzen Weg:** Abgleich mit einem Uhrversatz ungleich 0 (z. B. +90 000 ms) und gesetztem Sitzungsstart der Seite. Die Operation, die am Core ankommt, trägt `created_at`, `t_start_ms` und `t_end_ms` **unverändert** wie der Strich des Core und `clock_uncertain = false`. Der Eintrag der Warteschlange hat `clockUncertain = false` und `sessionStartMS = nil`. Ein Aufruf von `correct` ändert ihn nicht.
+  - Unbekannter Uhrversatz: kein Nachrüst-Upsert, die Seite bleibt markiert.
+  - **Geräteversatz:** Ist `stroke_offsets_ms` der Seite nicht leer, entsteht kein Nachrüst-Upsert für diese Seite. Normale Änderungen der Seite (neuer Strich, entfernter Strich) plant der Abgleich weiter.
+  - Ohne `stroke_sizes` am Core entsteht kein Upsert. Ein zweiter Abgleich nach dem Nachrüsten ergibt keine Änderung. Ein Strich, dessen `sizes` nach 23.3 Regel 2 wegfällt, erzeugt keine Operation und keine Schleife.
+  - Auslöser: einmal je `db_epoch`, nach einer Wiederherstellung (neue `db_epoch`) erneut.
+- **V2-5**
+  - Füller mit `force` überall 0,2 und `width` 4: Die Form ist in der Strichmitte 4 pt breit (± 0,2). Dasselbe mit `force` 0,8.
+  - Alle `force = 0`: kein Fehler, Durchmesser `width`.
+  - Kugelschreiber mit `force` von 0 bis 1 bei Median 0,2: Die Form ist nirgends breiter als `1,34 × width` (± 0,1 pt).
+  - `monoline` und `marker` unverändert. v2-Striche unverändert.
+
+### 23.10 Nur der Owner kann testen
+
+- iPad-App nach V2-3 neu bauen und auf einer neuen Seite schreiben: Füller dünn und dick eingestellt, leicht und fest gedrückt, dazu Kugelschreiber, Bleistift und Textmarker. Die Seite in der Web-App bei 100 % neben das iPad halten.
+- Darauf achten: Stimmt die Breite an dicken und dünnen Stellen? Sind waagerechte und senkrechte Striche mit Füller und Textmarker so breit wie auf dem iPad (Annahme A1)?
+- **Tempo (nach V2-2, spätestens nach V2-3):** Eine voll geschriebene Seite in der Web-App öffnen, zoomen und scrollen. Ruckelt es spürbar mehr als bei einer alten Seite, an Claude melden. Der Zeittest im Code misst nur das Bauen der Pfade (23.9).
+- **Entscheidung zu V2-4 (nach V2-3 und V2-5):** Eine alte Seite öffnen, die vor V2-3 geschrieben wurde. Sie wird mit der Schätzung aus V2-5 gezeichnet. Sieht sie noch sichtbar falsch aus, an Claude melden. Nur dann wird V2-4 umgesetzt.
+- Falls V2-4 kommt: Dieselbe alte Seite muss nach dem Abgleich wie auf dem iPad aussehen, und der Rückblick muss die Striche weiter den richtigen Folien zuordnen.
