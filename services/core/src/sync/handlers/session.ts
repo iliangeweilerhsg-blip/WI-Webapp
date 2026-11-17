@@ -39,12 +39,22 @@ function requireStream(op: SyncOp, sessionId: string): void {
   }
 }
 
-/** Die Session, zu der Session-Daten gehören. Weich gelöscht: Daten kommen mit ihr zurück (§11.2) */
+/**
+ * Die Session, zu der Session-Daten gehören. Weich gelöscht: Daten kommen mit ihr zurück (§11.2, §13).
+ *
+ * Sperre `FOR KEY SHARE` (VERTRAEGE §16.2, „Session-Zeile nach dem Strom“): Der Handler hält den Strom `session:<id>`
+ * schon (`appendOp`). Ein laufendes Löschen der Session (`softDelete`, `FOR UPDATE`, auch aus `ensurePlannedSessions`
+ * und `createOfflineSession` ohne Strom) wird abgewartet; danach steht hier das neue `deleted_at`. Ohne Sperre läse der
+ * Handler `deleted_at = NULL`, die Kaskade sähe den noch nicht eingefügten Datensatz nicht, und es bliebe ein aktiver
+ * Marker an einer gelöschten Session. Nicht `FOR SHARE`: Das kreuzt sich mit `FOR NO KEY UPDATE` von
+ * `transitionSession`, `runSessionTick` und `updateSession`, die danach den Strom wollen (40P01).
+ */
 async function parentSession(tx: Tx, sessionId: string): Promise<{ deletedAt: Date | null }> {
   const [parent] = await tx
     .select({ deletedAt: session.deletedAt })
     .from(session)
-    .where(eq(session.id, sessionId));
+    .where(eq(session.id, sessionId))
+    .for('key share');
   if (!parent) throw new SyncOpError('session_not_found', false, { session_id: sessionId });
   return parent;
 }
