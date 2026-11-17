@@ -157,9 +157,13 @@ export function useModuleSessions(moduleId: string) {
  * `POST /sessions/{id}/start` (Serverzeit). Eine andere aktive Session beendet der Core vorher und liefert sie als
  * `ended_session` mit. Der Doppel-Tipp auf eine laufende Session ist kein Fehler (§9.1).
  */
-export function startSession(id: string, startedFrom: 'mac' | 'ipad' = 'mac'): Promise<SessionStartResult> {
+export function startSession(
+  id: string,
+  startedFrom: 'mac' | 'ipad' = 'mac',
+  slideDeckId?: string,
+): Promise<SessionStartResult> {
   return apiSend('POST', `/sessions/${id}/start`, SessionStartResultSchema, {
-    body: { started_from: startedFrom },
+    body: { started_from: startedFrom, ...(slideDeckId ? { slide_deck_id: slideDeckId } : {}) },
   });
 }
 
@@ -209,9 +213,18 @@ export function mergeSession(
 // Spontane Session ohne Termin (F-SES-04, Issue #120): `POST /sessions`, danach `POST /sessions/{id}/start`
 // ---------------------------------------------------------------------------------------------
 
-/** `POST /sessions` (§7.2): spontane Session im Zustand `bereit`. Die Client-ID macht Wiederholungen sicher. */
-export function createSession(moduleId: string, id: string = uuidv7()): Promise<Session> {
-  return apiSend('POST', '/sessions', SessionSchema, { body: { id, module_id: moduleId } });
+/**
+ * `POST /sessions` (§7.2): spontane Session im Zustand `bereit`. Die Client-ID macht Wiederholungen sicher.
+ * `slideDeckId` ist der Vorschlag aus `deck-options` (§22.7); der Core wählt nie selbst.
+ */
+export function createSession(
+  moduleId: string,
+  id: string = uuidv7(),
+  slideDeckId?: string,
+): Promise<Session> {
+  return apiSend('POST', '/sessions', SessionSchema, {
+    body: { id, module_id: moduleId, ...(slideDeckId ? { slide_deck_id: slideDeckId } : {}) },
+  });
 }
 
 /**
@@ -221,9 +234,10 @@ export function createSession(moduleId: string, id: string = uuidv7()): Promise<
 export async function createAndStartSession(
   moduleId: string,
   id: string = uuidv7(),
+  slideDeckId?: string,
 ): Promise<SessionStartResult> {
   try {
-    await createSession(moduleId, id);
+    await retryWithoutDeck(slideDeckId, (deckId) => createSession(moduleId, id, deckId));
   } catch (cause) {
     if (!(cause instanceof ApiRequestError && cause.code === 'session_exists')) throw cause;
   }
@@ -342,4 +356,113 @@ export function rememberLastModuleId(moduleId: string): void {
 export function newerSession(known: Session | undefined | null, incoming: Session): Session {
   if (!known || known.id !== incoming.id) return incoming;
   return time(incoming.updated_at) < time(known.updated_at) ? known : incoming;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Folien in der Vorlesung (VERTRAEGE §22.4, §22.7)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * `PATCH /sessions/{id}` mit `slide_deck_id` (§22.4): Satz setzen, wechseln (`null` = leeren). Gleicher Wert ist kein
+ * Fehler. 409 `slide_deck_locked` nach dem ersten Folienwechsel, 409 `slide_deck_session_closed` nach dem Ende.
+ */
+export function setSessionDeck(id: string, slideDeckId: string | null): Promise<Session> {
+  return apiSend('PATCH', `/sessions/${encodeURIComponent(id)}`, SessionSchema, {
+    body: { slide_deck_id: slideDeckId },
+  });
+}
+
+/** Der Core kennt den mitgeschickten Satz nicht (mehr) oder er gehört zu einem anderen Modul */
+export function isDeckRejected(cause: unknown): boolean {
+  return (
+    cause instanceof ApiRequestError &&
+    ((cause.status === 404 && cause.code === 'slide_deck_not_found') ||
+      (cause.status === 400 && cause.code === 'slide_deck_module_mismatch'))
+  );
+}
+
+/**
+ * Der Start wartet nie auf Folien und scheitert nie an ihnen (§22.7): Lehnt der Core den Satz ab, wird einmal ohne
+ * `slide_deck_id` wiederholt. Die Live-Ansicht bietet die Folien danach an.
+ */
+export async function retryWithoutDeck<T>(
+  slideDeckId: string | undefined,
+  run: (slideDeckId: string | undefined) => Promise<T>,
+): Promise<T> {
+  try {
+    return await run(slideDeckId);
+  } catch (cause) {
+    if (slideDeckId !== undefined && isDeckRejected(cause)) return run(undefined);
+    throw cause;
+  }
+}
+
+const NO_DECK_PREFIX = 'sg.folien.ohne.';
+const OFFER_PREFIX = 'sg.folien.angebot.';
+
+function sessionStore(): Storage | null {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** „Ohne Folien“ gewählt: Der Vorschlag wird dann beim Start nicht mitgeschickt (nur dieser Tab, §22.7) */
+export function readNoDeck(sessionId: string): boolean {
+  try {
+    return sessionStore()?.getItem(`${NO_DECK_PREFIX}${sessionId}`) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function rememberNoDeck(sessionId: string, on: boolean): void {
+  try {
+    if (on) sessionStore()?.setItem(`${NO_DECK_PREFIX}${sessionId}`, '1');
+    else sessionStore()?.removeItem(`${NO_DECK_PREFIX}${sessionId}`);
+  } catch {
+    // Speicher gesperrt: Der Merker gilt dann nur bis zum Neuladen nicht, der Vorschlag bleibt sichtbar
+  }
+}
+
+/** Der Satz, den „Nicht jetzt“ in dieser Session ausgeblendet hat; ein anderer (neuerer) Satz wird wieder angeboten */
+export function readDismissedOffer(sessionId: string): string | null {
+  try {
+    return sessionStore()?.getItem(`${OFFER_PREFIX}${sessionId}`) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function dismissOffer(sessionId: string, deckId: string): void {
+  try {
+    sessionStore()?.setItem(`${OFFER_PREFIX}${sessionId}`, deckId);
+  } catch {
+    // Ohne Speicher kommt das Angebot nach dem Neuladen wieder: harmlos
+  }
+}
+
+/** Zustände, in denen eine Session Folien annimmt (§22.4) */
+const DECK_TARGET_STATES = ['geplant', 'bereit', 'laeuft', 'pausiert'] as const;
+
+/**
+ * Sessions des Moduls von heute, die einen hochgeladenen Foliensatz noch annehmen: nicht abgeschlossen und ohne Satz
+ * (§22.7, Feld „Für Vorlesung“). Die laufende steht zuerst, dann nach Zeit.
+ */
+export function useDeckUploadSessions(moduleId: string) {
+  return useQuery({
+    queryKey: ['sessions', 'upload-ziele', moduleId],
+    queryFn: ({ signal }) => {
+      const from = new Date();
+      from.setHours(0, 0, 0, 0);
+      const to = new Date(from);
+      to.setDate(to.getDate() + 1);
+      return listSessions({ moduleId, states: DECK_TARGET_STATES, from, to, limit: 20 }, signal);
+    },
+    select: (sessions) =>
+      sessions
+        .filter((s) => s.slide_deck_id === null)
+        .sort((a, b) => Number(isActive(b)) - Number(isActive(a)) || sessionAnchor(a) - sessionAnchor(b)),
+  });
 }

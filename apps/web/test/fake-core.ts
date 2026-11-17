@@ -46,6 +46,14 @@ import {
   reopenCardBatch,
   type FakeCardsState,
 } from './fake-cards.ts';
+import {
+  applyDeck,
+  attachUpload,
+  checkDeckField,
+  checkUploadSession,
+  deckOptions,
+  patchSession,
+} from './fake-decks.ts';
 
 const USER = '0190f6a2-0000-7000-8000-000000000000';
 const NOW = '2026-11-04T08:00:00Z';
@@ -547,6 +555,8 @@ export interface FakeCore {
   decks: SlideDeck[];
   sheets: ExerciseSheet[];
   slides: Record<string, Slide[]>;
+  /** Herkunft (Moodle) und Verfügbarkeit je Foliensatz für `deck-options` (VERTRAEGE §22.3); ohne Eintrag: Upload */
+  deckMeta: Record<string, { moodle?: boolean; available_at?: string }>;
   /** Sessions für GET /sessions und POST /sessions/{id}/start|pause|resume|stop|extend (VERTRAEGE §7.2, §9.4) */
   sessions: Session[];
   /** Notizbücher für GET /notebooks?module_id (VERTRAEGE §7.4) */
@@ -787,6 +797,7 @@ export function installFakeCore(
     decks: structuredClone(initial.decks ?? []),
     sheets: structuredClone(initial.sheets ?? []),
     slides: {},
+    deckMeta: {},
     sessions: structuredClone(initial.sessions ?? []),
     notebooks: [],
     pages: [],
@@ -995,6 +1006,13 @@ export function installFakeCore(
         core.modules.push(created);
         return json(created, 201);
       }
+      // GET /modules/{id}/deck-options?session_id (§22.3)
+      const deckOptionsMatch = /^\/modules\/([^/]+)\/deck-options$/.exec(path);
+      if (deckOptionsMatch && method === 'GET') {
+        const result = deckOptions(core, deckOptionsMatch[1] ?? '', url);
+        return json(result.body, result.status);
+      }
+
       const moduleMatch = /^\/modules\/([^/]+)$/.exec(path);
       if (moduleMatch && method === 'PATCH') {
         const target = core.modules.find((m) => m.id === moduleMatch[1] && !m.deleted_at);
@@ -1056,6 +1074,8 @@ export function installFakeCore(
         if (core.sessions.some((x) => x.id === id)) {
           return json({ error: { code: 'session_exists', message: 'x' } }, 409);
         }
+        const rejectedDeck = checkDeckField(core, moduleId as string, body?.slide_deck_id);
+        if (rejectedDeck) return json(rejectedDeck.body, rejectedDeck.status);
         const stamp = new Date().toISOString();
         const created = makeSession({
           id,
@@ -1065,6 +1085,7 @@ export function installFakeCore(
           created_at: stamp,
           updated_at: stamp,
         });
+        applyDeck(core, created, body?.slide_deck_id);
         core.sessions.push(created);
         return json(created, 201);
       }
@@ -1168,6 +1189,14 @@ export function installFakeCore(
         return found
           ? json(structuredClone(found))
           : json({ error: { code: 'calendar_event_not_found', message: 'x' } }, 404);
+      }
+
+      // PATCH /sessions/{id} (§22.4): `title` und `slide_deck_id`
+      if (sessionOne && method === 'PATCH') {
+        const found = core.sessions.find((x) => x.id === sessionOne[1] && !x.deleted_at);
+        if (!found) return json({ error: { code: 'session_not_found', message: 'x' } }, 404);
+        const result = patchSession(core, found, body);
+        return json(result.body, result.status);
       }
 
       // DELETE /sessions/{id} (§7.2): weich löschen; 409 `session_active`, wenn sie läuft oder pausiert
@@ -1324,6 +1353,9 @@ export function installFakeCore(
           ) {
             return invalid();
           }
+          // Mit `slide_deck_id` wird der Satz geprüft und gesetzt, ohne Sperrprüfung (§22.4); sonst bleibt der vorhandene
+          const rejectedDeck = checkDeckField(core, target.module_id, body?.slide_deck_id);
+          if (rejectedDeck) return json(rejectedDeck.body, rejectedDeck.status);
           // Eine andere aktive Session endet vorher am Kalenderende, spätestens jetzt (§9.1)
           const other = core.sessions.find(
             (x) => x.id !== target.id && !x.deleted_at && (x.state === 'laeuft' || x.state === 'pausiert'),
@@ -1337,6 +1369,7 @@ export function installFakeCore(
             other.stop_reason = 'kalenderende';
             other.updated_at = new Date(now).toISOString();
           }
+          applyDeck(core, target, body?.slide_deck_id);
           target.state = 'laeuft';
           target.started_at = new Date(now).toISOString();
           target.started_from = (body?.started_from as Session['started_from'] | undefined) ?? 'mac';
@@ -1412,6 +1445,13 @@ async function handleMaterial(core: FakeCore, call: MaterialCall): Promise<Respo
       }
       const file = form.get('file') as File;
       const moduleId = String(form.get('module_id'));
+      // Mit `session_id` (§22.5): abgeschlossene Session, fremdes Modul oder unbekannt scheitern, bevor etwas entsteht
+      const sentSession = deck ? form.get('session_id') : null;
+      let uploadSession: ReturnType<typeof checkUploadSession> | null = null;
+      if (typeof sentSession === 'string' && sentSession !== '') {
+        uploadSession = checkUploadSession(core, moduleId, sentSession);
+        if ('status' in uploadSession) return json(uploadSession.body, uploadSession.status);
+      }
       const sha256 = createHash('sha256').update(`${file.name}:${file.size}`).digest('hex');
       const forced = core.nextUploadDuplicateOf;
       core.nextUploadDuplicateOf = null;
@@ -1432,6 +1472,10 @@ async function handleMaterial(core: FakeCore, call: MaterialCall): Promise<Respo
         status = 201;
         result = { id, duplicate: false };
       }
+      const landed = existing ?? list.find((x) => x.id === result.id);
+      if (uploadSession && 'session' in uploadSession && landed) {
+        attachUpload(core, uploadSession.session, landed as SlideDeck);
+      }
       core.idempotent.set(key, { status, body: result });
       if (core.failNextUpload === 'after') {
         core.failNextUpload = null;
@@ -1449,7 +1493,9 @@ async function handleMaterial(core: FakeCore, call: MaterialCall): Promise<Respo
     const match = new RegExp(`^${prefix}/([^/]+)$`).exec(path);
     if (match) {
       const target = list.find((x) => x.id === match[1] && !x.deleted_at);
-      if (!target) return json({ error: { code: 'not_found', message: 'x' } }, 404);
+      if (!target) {
+        return json({ error: { code: deck ? 'slide_deck_not_found' : 'not_found', message: 'x' } }, 404);
+      }
       if (method === 'GET') {
         return json(deck ? { deck: target, slides: core.slides[target.id] ?? [] } : target);
       }

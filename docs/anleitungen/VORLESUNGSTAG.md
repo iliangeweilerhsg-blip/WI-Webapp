@@ -19,7 +19,7 @@ Diese Liste hilft, dass die Aufnahme in der Vorlesung durchläuft. Sie gilt für
 
 ## Aufnahme
 
-1. **Starten:** Auf **Heute** gibt es für den Termin einen Knopf **Jetzt starten** (je nach Zeit auch **Start** oder **Früher starten**). Ohne Termin: **Session starten** und ein Modul wählen.
+1. **Starten:** Auf **Heute** gibt es für den Termin einen Knopf **Jetzt starten** (je nach Zeit auch **Start** oder **Früher starten**). Ohne Termin: **Session starten** und ein Modul wählen. Die Folien stehen im Abschnitt „Folien“ unten.
 2. Erlaube dem Browser das Mikrofon. Fragt er nicht, erscheint unten **Aufnahme starten** (Statusleiste oder Aufnahme-Leiste). Klicke darauf.
 3. Prüfe in der Statusleiste die Anzeige **REC** mit Laufzeit. Steht dort etwas anderes, zum Beispiel **Zugriff verweigert**, **Mikrofon fehlt**, **Aufnahme gestört**, **Pausiert** oder ein Hinweis, dass nicht aufgenommen wird, dann wird nichts aufgenommen.
 4. **Pausieren:** **Pause**. Danach unbedingt **Fortsetzen**, sonst bleibt der Rest ohne Ton.
@@ -28,6 +28,25 @@ Diese Liste hilft, dass die Aufnahme in der Vorlesung durchläuft. Sie gilt für
 7. **Du kannst die Vorlesungs-Ansicht verlassen.** Die Aufnahme läuft weiter, auch auf **Heute**, in den Einstellungen oder in einem Modul. Unten steht dann eine schmale Leiste mit **REC** und der Laufzeit. **Zur Vorlesung** bringt dich zurück. Steht dort etwas anderes als **REC**, wird nicht aufgenommen. Zeigt die Leiste **Aufnahme starten**, klicke darauf.
 
 Die App beendet die Session auch selbst: spätestens 30 Minuten nach dem Kalenderende (**Einstellungen → Vorlesung → Spätestens nach Kalenderende**) und nach höchstens 4 Stunden (**Höchstdauer**). Vorher erscheint ein Hinweis „weiter aufnehmen?“, mit dem du verlängerst.
+
+## Folien
+
+Die Folien einer Vorlesung kommen meist aus Moodle. Du musst vorher nichts einstellen. Der Start wartet nie auf die Folien: Ein Tipp startet, auch wenn gerade keine da sind.
+
+1. **Vor dem Start:** Auf **Heute** steht unter dem Titel der Karte eine Zeile.
+   - **Folien: ‹Titel›** (bei Moodle mit „aus Moodle“): Dieser Satz ist der Vorschlag, der neueste, den noch keine andere Vorlesung trägt. Ein Tipp auf **Start** nimmt ihn mit.
+   - **Ohne Folien**: Es gibt keinen freien Satz, oder du hast **Ohne Folien** gewählt.
+   - **Ändern** klappt eine Liste auf: alle Foliensätze des Moduls (bei belegten steht „schon in VL 6“), **Ohne Folien** und **PDF hochladen …**. Eine Wahl gilt sofort. **Esc** schließt die Liste.
+   - Fehlt die Zeile, hat der Core die Folien noch nicht geliefert. Starte trotzdem, die Vorlesungs-Ansicht bietet sie danach an.
+2. **Ohne Termin** (**Session starten**): Unter dem Modul steht derselbe Vorschlag. **Ohne Folien** nimmt ihn weg. Einen anderen Satz wählst du in der Vorlesungs-Ansicht.
+3. **Während der Vorlesung** (Spalte **Folie** der Vorlesungs-Ansicht), solange die Session keine Folien hat:
+   - **Neue Folien aus Moodle: ‹Titel›** mit **Übernehmen** und **Nicht jetzt**. Das erscheint von selbst, wenn der Dozent kurz vor oder während der Vorlesung hochlädt. Es dauert bis zu 10 Minuten nach dem Hochladen. Nichts wechselt von selbst: Erst **Übernehmen** setzt den Satz. **Nicht jetzt** blendet diesen Satz aus, ein noch neuerer wird wieder angeboten.
+   - **Folien wählen** öffnet dieselbe Liste wie auf **Heute**. **PDF hochladen** nimmt eine Datei vom Mac und hängt sie an diese Vorlesung. Bis die Datei gelesen ist, steht dort „Folien werden verarbeitet …“.
+   - Das Setzen blättert nicht. Am Mac steht danach Folie 1, bis du blätterst.
+4. **Falscher Satz?** Solange du **noch nicht geblättert** hast, wählst du unter den Folien **Anderen Foliensatz wählen** oder **Ohne Folien**. Nach dem ersten Blättern (auch auf dem iPad) geht das nicht mehr. Dort steht dann nur noch der Satz. Wählt ein zweiter Tab trotzdem, sagt die App: „Der Foliensatz bleibt, weil in dieser Vorlesung schon geblättert wurde.“
+5. **Gelöscht:** Löschst du den Foliensatz der laufenden Vorlesung, steht dort „Die Folien dieser Vorlesung sind gelöscht.“. Mit **Folien wählen** nimmst du einen anderen, solange du nicht geblättert hast.
+6. **PDF im Voraus:** Auf der Modulseite (Tab **Vorlesungen**) wählst du beim Hochladen **Für Vorlesung**. Zur Wahl stehen die heutigen Vorlesungen ohne Folien (Standard: die laufende, sonst **keine**). So ist der Satz schon da, wenn du startest. Eine beendete Vorlesung nimmt keine Folien mehr an.
+7. Das iPad übernimmt den Satz einer laufenden Vorlesung von selbst. **Auf die Folie schreiben** geht, sobald der Mac zum ersten Mal geblättert hat.
 
 ## Wenn der Akku leer wird
 

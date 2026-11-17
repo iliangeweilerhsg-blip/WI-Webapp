@@ -5,12 +5,23 @@
 // Operation `slide.change` in den Strom der Session (VERTRAEGE §11.3), mit Sitzungszeit seit `started_at`.
 // Fremde Wechsel (iPad, anderer Tab) kommen über denselben Strom und aktualisieren die Anzeige.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Slide } from '@sg/shared';
-import { pageImageUrl, pageThumbUrl, useDeckDetail } from '../../../lib/material.ts';
+import { useQueryClient } from '@tanstack/react-query';
+import type { Session, Slide } from '@sg/shared';
+import { ApiRequestError } from '../../../lib/api.ts';
+import {
+  deckOptionsKey,
+  pageImageUrl,
+  pageThumbUrl,
+  useDeckDetail,
+  useDeckOptions,
+} from '../../../lib/material.ts';
 import { sessionStreamId, sessionTimeMs, syncedNowMs } from '../../../lib/session-stream.ts';
 import { isEditableTarget } from '../../../lib/shortcuts.ts';
 import { SyncHandedOverError, type SyncClient } from '../../../lib/sync/client.ts';
 import { uuidv7 } from '../../../lib/uuid.ts';
+import { useDeckChoice } from '../../slides/use-deck-choice.ts';
+import { watchReconnect } from '../reconnect.ts';
+import { DeckStrip, NoDeckPanel } from './DeckActions.tsx';
 import { useSlidePosition } from './use-slide-position.ts';
 
 export interface SlidesPanelProps {
@@ -24,14 +35,25 @@ export interface SlidesPanelProps {
   startedAt: number | null;
   /** Sync-Client dieses Tabs; `null` vor dem ersten Effekt */
   client: SyncClient | null;
+  /** Neue Fassung der Session aus einer Antwort des Core (nach dem Setzen oder Wechseln des Foliensatzes) */
+  onSession?: (session: Session) => void;
 }
 
-function Hint({ children }: { children: string }) {
+/** Abstand der Abfrage nach neuen Folien in einer Session ohne Satz (VERTRAEGE §22.6) */
+export const DECK_OFFER_POLL_MS = 60_000;
+
+const NO_SESSION_UPDATE = () => undefined;
+
+function Hint({ children, footer }: { children: string; footer?: React.ReactNode }) {
   return (
-    <div data-testid="slides-panel" className="flex h-full items-center justify-center p-6 text-center">
+    <div
+      data-testid="slides-panel"
+      className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center"
+    >
       <p role="status" className="text-md text-text-muted">
         {children}
       </p>
+      {footer}
     </div>
   );
 }
@@ -44,6 +66,8 @@ export function slideStep(e: KeyboardEvent): -1 | 1 | null {
   if (isEditableTarget(target)) return null;
   // Trennlinien und Reiter nutzen die Pfeiltasten selbst (VERTRAEGE §16.3)
   if (target?.closest?.('[role="separator"], [role="tab"]')) return null;
+  // Die Liste der Foliensätze (`DeckPicker`) nutzt die Pfeiltasten selbst; ein Blättern würde den Satz sperren
+  if (target?.closest?.('[data-slide-keys="off"]')) return null;
   if (e.key === 'ArrowLeft') return -1;
   if (e.key === 'ArrowRight') return 1;
   if (e.key === ' ') {
@@ -54,8 +78,47 @@ export function slideStep(e: KeyboardEvent): -1 | 1 | null {
   return null;
 }
 
-export function SlidesPanel({ sessionId, slideDeckId, active, startedAt, client }: SlidesPanelProps) {
+export function SlidesPanel({
+  sessionId,
+  moduleId,
+  slideDeckId,
+  active,
+  startedAt,
+  client,
+  onSession = NO_SESSION_UPDATE,
+}: SlidesPanelProps) {
+  const queryClient = useQueryClient();
   const deck = useDeckDetail(slideDeckId ?? '', { enabled: slideDeckId !== null });
+  // Der Satz der Session ist gelöscht (der Zeiger bleibt, die Abfrage sagt 404): wie „kein Satz“ behandeln (§22.2)
+  const deleted =
+    slideDeckId !== null &&
+    deck.isError &&
+    deck.error instanceof ApiRequestError &&
+    deck.error.status === 404;
+  const noDeck = slideDeckId === null || deleted;
+  // `deck-options` (§22.3, §22.6): ohne Satz zum Anbieten und Abfragen auf Moodle, mit Satz einmal für die Sperre
+  const options = useDeckOptions(moduleId, sessionId, {
+    enabled: active || deleted,
+    refetchOnVisible: noDeck && active,
+    // Hat die Session einen Satz, fragt die Live-Ansicht nicht mehr (§22.6)
+    refetchInterval: () => (active && noDeck ? DECK_OFFER_POLL_MS : false),
+  });
+  // Bekommt die Session von außen einen anderen Satz (`session.updated`), stimmt `lock` nicht mehr: neu laden
+  const lastDeck = useRef(slideDeckId);
+  useEffect(() => {
+    if (lastDeck.current === slideDeckId) return;
+    lastDeck.current = slideDeckId;
+    void queryClient.invalidateQueries({ queryKey: deckOptionsKey(moduleId, sessionId) });
+  }, [slideDeckId, queryClient, moduleId, sessionId]);
+  const choice = useDeckChoice({ id: sessionId, module_id: moduleId }, onSession);
+  // Nach jedem Neuverbinden des Sync-Clients nachfragen (§22.6), solange es Folien anzubieten gibt
+  useEffect(() => {
+    if (!client || !noDeck || !active) return;
+    return watchReconnect(client, () => {
+      void queryClient.invalidateQueries({ queryKey: deckOptionsKey(moduleId, sessionId) });
+    });
+  }, [client, noDeck, active, queryClient, moduleId, sessionId]);
+
   const { position, setPosition, getPosition } = useSlidePosition(
     sessionId,
     slideDeckId !== null ? client : null,
@@ -126,12 +189,28 @@ export function SlidesPanel({ sessionId, slideDeckId, active, startedAt, client 
     el?.scrollIntoView?.({ block: 'nearest' });
   }, [current, total]);
 
-  if (slideDeckId === null) return <Hint>Folien kommen später – einfach mitschreiben</Hint>;
+  if (noDeck) {
+    return (
+      <NoDeckPanel
+        sessionId={sessionId}
+        deleted={deleted}
+        active={active}
+        startedAt={startedAt}
+        options={options.data}
+        choice={choice}
+      />
+    );
+  }
   if (deck.isPending) return <Hint>Folien werden geladen …</Hint>;
   if (deck.isError) return <Hint>Folien sind gerade nicht erreichbar.</Hint>;
+  // Bei einem Satz, der nicht lesbar ist oder noch verarbeitet wird, bleibt der Wechsel möglich (solange nicht
+  // geblättert: der Core sagt es über `lock`, eine bekannte Position meldet auch fremde Wechsel von iPad und Tabs)
+  const strip = (
+    <DeckStrip options={options.data} locked={position !== null} active={active} choice={choice} />
+  );
   if (deck.data.deck.ingest_state === 'fehler')
-    return <Hint>Der Foliensatz konnte nicht eingelesen werden.</Hint>;
-  if (total === 0) return <Hint>Folien werden verarbeitet …</Hint>;
+    return <Hint footer={strip}>Der Foliensatz konnte nicht eingelesen werden.</Hint>;
+  if (total === 0) return <Hint footer={strip}>Folien werden verarbeitet …</Hint>;
 
   const slide = slides[current - 1];
   const btn =
@@ -224,6 +303,7 @@ export function SlidesPanel({ sessionId, slideDeckId, active, startedAt, client 
             </span>
           ) : null}
         </div>
+        {strip}
       </div>
     </div>
   );
