@@ -121,6 +121,14 @@ describe('Fake-Core: deck-options (22.3)', () => {
     expect(result.lock).toBe('folienwechsel');
   });
 
+  it('ein Satz eines anderen Moduls an der Session gilt als „kein Satz“: nicht aktuell, nicht in items, Vorschlag möglich', async () => {
+    setup([makeSession({ id: S, state: 'laeuft', slide_deck_id: FOREIGN })]);
+    const result = await options();
+    expect(result.current_deck_id).toBeNull();
+    expect(result.items.some((o) => o.deck.id === FOREIGN)).toBe(false);
+    expect(result.suggested_deck_id).toBe(B);
+  });
+
   it('abgeschlossene Session: lock abgeschlossen, kein Vorschlag', async () => {
     setup([makeSession({ id: S, state: 'beendet', slide_deck_id: null })]);
     const result = await options();

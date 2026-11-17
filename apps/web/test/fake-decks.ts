@@ -34,10 +34,13 @@ function liveEvents(core: DeckCore, sessionId: string): number {
   return core.slideEvents.filter((e) => e.session_id === sessionId && e.deleted_at === null).length;
 }
 
-/** Der nicht gelöschte Satz einer Session, sonst `null` (gelöscht zählt wie „kein Satz“, 22.2) */
+/**
+ * Der gültige Satz einer Session (nicht gelöscht, aus dem Modul der Session), sonst `null`: Gelöscht oder aus einem
+ * anderen Modul zählt wie „kein Satz“ (22.2/22.3), wie im Core (`deck-options.ts`, `usableDeckId`)
+ */
 function currentDeck(core: DeckCore, session: Session): SlideDeck | null {
   const deck = core.decks.find((d) => d.id === session.slide_deck_id);
-  return live(deck) ? deck : null;
+  return live(deck) && deck.module_id === session.module_id ? deck : null;
 }
 
 function availableAt(core: DeckCore, deck: SlideDeck): string {
@@ -206,8 +209,7 @@ export function checkDeckField(
 
 /** Gültiger Satz: Zeiger gesetzt, Satz nicht gelöscht und aus dem Modul der Session (22.4) */
 function hasValidDeck(core: DeckCore, session: Session): boolean {
-  const deck = currentDeck(core, session);
-  return deck !== null && deck.module_id === session.module_id;
+  return currentDeck(core, session) !== null;
 }
 
 export function applyDeck(core: DeckCore, session: Session, value: unknown): void {
