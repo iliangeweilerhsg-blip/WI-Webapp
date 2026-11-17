@@ -3284,9 +3284,12 @@ describe('Restpunkte aus #324: Hash beim Kopieren, verlinkte Dateien prüfen, Li
     const bare = linkedFilesWarning(three, STAND, 175) as string;
     expect(bare.length).toBeLessThanOrEqual(175);
     expect(bare).toContain(`pnpm sg restore --test ${STAND}`);
-    const none = linkedFilesWarning(three, STAND, 160) as string;
-    expect(none).not.toContain('media/');
-    expect(none).toContain('3 unveränderte Dateien');
+    const bareLen = linkedFilesWarning(three, STAND, bare.length) as string;
+    expect(bareLen).not.toContain('media/');
+    expect(bareLen).toContain('3 unveränderte Dateien');
+    expect(bareLen).toContain(`pnpm sg restore --test ${STAND}`);
+    // Passt nicht einmal die Fassung ohne Pfade, entfällt die Warnung (kein Stummel mit gekürztem Befehl)
+    expect(linkedFilesWarning(three, STAND, bareLen.length - 1)).toBeNull();
     // Andere Warnungen haben Vorrang: kein Platz mehr, die Gesamtgrenze bleibt
     const others = 'R'.repeat(496);
     expect(composeWarnings(linked, [others])).toBe(others);

@@ -945,9 +945,10 @@ export function linkedFilesWarning(paths: string[], previous: string, maxLen = W
     const limit = Math.min(LINKED_PATH_LEN, Math.floor(room / k));
     if (limit >= LINKED_PATH_MIN) return assemble(lines.slice(0, k).map((l) => clipUnits(l, limit)));
   }
+  // Fehlt selbst für die Fassung ohne Pfade der Platz, entfällt die Warnung (Vertrag 13): ein gekürzter Stummel
+  // nennte einen falschen Befehl. Das Log nennt sie weiter vollständig.
   const bare = assemble([]);
-  if (bare.length <= maxLen) return bare;
-  return maxLen >= 20 ? clipUnits(bare, maxLen) : null;
+  return bare.length <= maxLen ? bare : null;
 }
 
 /**
