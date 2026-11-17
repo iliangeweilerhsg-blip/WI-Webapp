@@ -207,10 +207,11 @@ describe('Start-Karte: Abfrage der Foliensätze', () => {
     expect(post(/\/start$/)[0]!.body).toEqual({ started_from: 'mac', slide_deck_id: D4 });
   });
 
-  it('hat die Session inzwischen einen Satz, kommt kein Vorschlag mit (B1 bleibt)', async () => {
+  it('die Abfrage holt den veralteten Vorschlag ein: Hat die Session inzwischen einen Satz, geht kein Feld mit', async () => {
     boot();
     await row();
-    // Ein anderer Weg setzt den Satz, die Karte hat die Session noch ohne Satz
+    // Ein anderer Weg setzt den Satz, die Karte hat die Session noch ohne Satz. Bewiesen wird nur, dass die Abfrage
+    // (nicht der Core, §22.4) den Stand einholt und der Start danach ohne Feld geht.
     core.sessions = core.sessions.map((s) => (s.id === SESSION_ID ? { ...s, slide_deck_id: D1 } : s));
     await SPAN(61_000);
     await waitFor(() => expect(startCalls()).toHaveLength(2));
@@ -266,9 +267,16 @@ describe('Start-Karte: Abfrage der Foliensätze', () => {
     expect(startCalls().length).toBeGreaterThan(after);
   });
 
-  it('fragt nicht ab, solange ein Upload läuft oder lief (uploading)', async () => {
+  it('fragt nicht ab, solange ein Upload läuft (uploading)', async () => {
     boot();
     await row();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const coreFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST' && String(input).endsWith('/slide-decks')) await gate;
+      return coreFetch(input, init);
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Ändern' }));
     const input = screen.getByLabelText('PDF-Dateien auswählen', { selector: 'input' }) as HTMLInputElement;
     fireEvent.change(input, {
@@ -278,6 +286,36 @@ describe('Start-Karte: Abfrage der Foliensätze', () => {
     const before = startCalls().length;
     await SPAN(130_000);
     expect(startCalls()).toHaveLength(before);
+    // Der Start schickt währenddessen keinen Vorschlag mit
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    await waitFor(() => expect(post(/\/start$/)).toHaveLength(1));
+    expect(post(/\/start$/)[0]!.body).toEqual({ started_from: 'mac' });
+    release();
+    await SPAN(10);
+  });
+});
+
+describe('Start-Karte: gescheiterter Upload', () => {
+  it('nach einem gescheiterten Upload läuft die Abfrage weiter, ein neuer Satz erscheint nach 60 s', async () => {
+    boot();
+    await row();
+    fireEvent.click(screen.getByRole('button', { name: 'Ändern' }));
+    const input = screen.getByLabelText('PDF-Dateien auswählen', { selector: 'input' }) as HTMLInputElement;
+    // Kein PDF: Der Eintrag steht sofort auf `fehler`, nichts wird hochgeladen
+    fireEvent.change(input, {
+      target: { files: [new File(['x'], 'Notizen.txt', { type: 'text/plain' })] },
+    });
+    await SPAN(10);
+    expect(post(/\/slide-decks$/)).toHaveLength(0);
+    const before = startCalls().length;
+    addMoodleDeck();
+    await SPAN(61_000);
+    await waitFor(() => expect(startCalls().length).toBeGreaterThan(before));
+    await waitFor(() => expect(screen.getByTestId('start-deck')).toHaveTextContent('Folien: VL 08 Sperren'));
+    // … und der Start schickt den neuen Vorschlag mit
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    await waitFor(() => expect(post(/\/start$/)).toHaveLength(1));
+    expect(post(/\/start$/)[0]!.body).toEqual({ started_from: 'mac', slide_deck_id: D4 });
   });
 });
 
@@ -305,5 +343,50 @@ describe('Spontaner Start: Abfrage der Foliensätze', () => {
     window.dispatchEvent(new Event('visibilitychange'));
     await SPAN(130_000);
     expect(moduleCalls()).toHaveLength(before);
+  });
+
+  it('beim Sichtbarwerden des Tabs fragt der spontane Start sofort ab', async () => {
+    boot();
+    await screen.findByLabelText('Modul');
+    fireEvent.change(screen.getByLabelText('Modul'), { target: { value: DBS.id } });
+    await screen.findByTestId('spontan-deck');
+    const before = moduleCalls().length;
+    const state = vi.spyOn(document, 'visibilityState', 'get');
+    state.mockReturnValue('hidden');
+    window.dispatchEvent(new Event('visibilitychange'));
+    addMoodleDeck();
+    state.mockReturnValue('visible');
+    await act(async () => void window.dispatchEvent(new Event('visibilitychange')));
+    await waitFor(() => expect(moduleCalls().length).toBeGreaterThan(before));
+    await waitFor(() => expect(screen.getByTestId('spontan-deck')).toHaveTextContent('VL 08 Sperren'));
+  });
+
+  it('beim Anlegen („Session starten“) ruht die Abfrage: kein Intervall, kein Sichtbarwerden', async () => {
+    boot();
+    await screen.findByLabelText('Modul');
+    fireEvent.change(screen.getByLabelText('Modul'), { target: { value: DBS.id } });
+    await screen.findByTestId('spontan-deck');
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const coreFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST' && String(input).endsWith('/sessions')) await gate;
+      return coreFetch(input, init);
+    });
+    const before = moduleCalls().length;
+    fireEvent.click(screen.getByRole('button', { name: 'Session starten' }));
+    await SPAN(10);
+    expect(screen.getByRole('button', { name: /Wird gestartet/ })).toBeInTheDocument();
+    await SPAN(130_000);
+    expect(moduleCalls()).toHaveLength(before);
+    const state = vi.spyOn(document, 'visibilityState', 'get');
+    state.mockReturnValue('hidden');
+    window.dispatchEvent(new Event('visibilitychange'));
+    state.mockReturnValue('visible');
+    await act(async () => void window.dispatchEvent(new Event('visibilitychange')));
+    await SPAN(10);
+    expect(moduleCalls()).toHaveLength(before);
+    release();
+    await SPAN(10);
   });
 });

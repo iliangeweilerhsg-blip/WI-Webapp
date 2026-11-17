@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DeckOption, Session } from '@sg/shared';
 import { DECK_POLL_MS, useDeckOptions } from '../../lib/material.ts';
+import { useOptionalUploads } from '../../lib/uploads.tsx';
 import { readNoDeck, rememberNoDeck } from '../../lib/sessions.ts';
 import { DeckPicker } from '../slides/DeckPicker.tsx';
 import { useDeckChoice } from '../slides/use-deck-choice.ts';
@@ -20,7 +21,7 @@ export interface StartDeck {
   open: boolean;
   setOpen: (open: boolean) => void;
   choice: ReturnType<typeof useDeckChoice>;
-  /** PDF-Upload für diese Session; ab dem Anstoßen schickt der Start den Vorschlag nicht mehr mit */
+  /** PDF-Upload für diese Session; solange er wartet oder läuft, schickt der Start den Vorschlag nicht mit */
   upload: ((files: File[]) => void) | undefined;
   options: ReturnType<typeof useDeckOptions>['data'];
   onChoose: (deckId: string | null) => Promise<void>;
@@ -33,12 +34,20 @@ export function useStartDeck(
   onSession: (session: Session) => void,
 ): StartDeck {
   const choice = useDeckChoice(session, onSession);
-  // Ein Upload für diese Session läuft oder lief: Er hängt den Satz selbst an, der Start schickt nichts mit
-  const [uploading, setUploading] = useState(false);
+  // Ein Upload für diese Session ist unterwegs (wartet oder läuft): Er hängt den Satz selbst an, der Start schickt
+  // nichts mit. Gescheiterte Uploads zählen nicht (§22.7 „kein Upload läuft“): Die Abfrage läuft weiter, ein neuer
+  // Satz erscheint. Ein Neuversuch setzt den Eintrag wieder auf `wartet`.
+  const uploads = useOptionalUploads();
+  const uploading =
+    session !== undefined &&
+    (uploads?.entries ?? []).some(
+      (e) =>
+        e.kind === 'folien' && e.sessionId === session.id && (e.status === 'wartet' || e.status === 'laeuft'),
+    );
   // Neue Sätze (Moodle-Abgleich zur Vorlesung §22.6, anderer Tab, Modulseite) sollen von selbst auf der Karte stehen:
   // beim Sichtbarwerden des Tabs und alle 60 s im sichtbaren Tab. Genau ein Intervall je Karte (die eine Start-Karte
-  // von Heute, `enabled` nur bei `bevorstehend`/`bereit`); nicht während einer Wahl oder eines Uploads, die die
-  // Optionen selbst setzen. Der Start wartet weiter nie darauf (B1, §22.4).
+  // von Heute, `enabled` nur bei `bevorstehend`/`bereit`); nicht während einer Wahl oder eines laufenden Uploads, die
+  // die Optionen selbst setzen. Der Start wartet weiter nie darauf (B1, §22.4).
   const poll = enabled && session !== undefined && !choice.busy && !uploading;
   const query = useDeckOptions(session?.module_id ?? '', session?.id ?? null, {
     enabled: enabled && session !== undefined,
@@ -51,7 +60,6 @@ export function useStartDeck(
   useEffect(() => {
     setNoDeck(sessionId ? readNoDeck(sessionId) : false);
     setOpen(false);
-    setUploading(false);
   }, [sessionId]);
 
   const options = query.data;
@@ -83,12 +91,7 @@ export function useStartDeck(
     open,
     setOpen,
     choice,
-    upload: choice.upload
-      ? (files: File[]) => {
-          setUploading(true);
-          choice.upload?.(files);
-        }
-      : undefined,
+    upload: choice.upload,
     options,
     onChoose,
   };
