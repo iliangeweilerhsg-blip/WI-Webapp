@@ -148,7 +148,8 @@ describe('SyncProvider mit echtem SyncClient', () => {
       await new Promise((r) => setTimeout(r, 20));
     });
     expect(screen.getByTestId('b')).toHaveTextContent('in einem anderen Tab aktiv');
-    expect(sockets.filter((s) => !s.closed).length).toBe(1);
+    // Leader-Verbindung von a und Mitlese-Verbindung von b (§11.8)
+    expect(sockets.filter((s) => !s.closed).length).toBe(2);
     a.unmount();
     await act(async () => {
       await new Promise((r) => setTimeout(r, 20));

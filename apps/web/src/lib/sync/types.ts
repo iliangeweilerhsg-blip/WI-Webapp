@@ -127,6 +127,8 @@ export interface ClientEventMap {
   'notebook.changed': Extract<SyncEvent, { name: 'notebook.changed' }>['data'];
   /** Verbindungszustand */
   connection: { state: ConnectionState; retryInMs: number | null; closeCode: number | null };
+  /** Zustand der eigenen Verbindung dieses Tabs hat sich geändert (`SyncClient.linkState`, auch im Folge-Tab) */
+  link: { state: ConnectionState };
   /** Ein Strom hat `reset` gemeldet (§11.1) */
   reset: ResetInfo;
   /** Der `onReset`-Handler ist gescheitert oder fehlt; der Strom bleibt stumm, bis neu abonniert wird */

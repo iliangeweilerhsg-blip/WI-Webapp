@@ -555,7 +555,15 @@ const scenarios = {
       'Tab 1 ist Leader und online, Tab 2 zeigt other_tab',
       (await roles(t1)).leader && (await roles(t2)).state === 'other_tab',
     );
-    check('Nur eine Sync-Verbindung insgesamt', t1.sockets.length === 1 && t2.sockets.length === 0);
+    await waitFor(
+      () => t2.page.evaluate(() => window.__h.client.linkState === 'online'),
+      10_000,
+      'Mitlese-Verbindung von Tab 2',
+    );
+    check(
+      'Je Tab eine Verbindung: Tab 1 als Leader, Tab 2 liest mit (§11.8) und sendet keine Operation',
+      t1.sockets.length === 1 && t2.sockets.length === 1 && framesOf(t2.sockets, 'out', 'op').length === 0,
+    );
 
     const nb = await createNotebook(t1.page);
     let total = 0;
@@ -623,6 +631,68 @@ const scenarios = {
     check('Schließt der Leader-Tab, übernimmt der andere und sendet', r.ok === 3, JSON.stringify(r));
     await context.close();
   },
+
+  /**
+   * 5: Folge-Tab liest live mit (Owner-Meldung vom 17.11.: Notizen nur nach erneutem Öffnen). Tab 2 abonniert den
+   * Notizbuch-Strom, ein anderer Schreiber (wie das iPad) schreibt Striche. Auch nach zwei Leader-Wechseln kommen sie an.
+   */
+  async followerLive(ctx) {
+    const context = await ctx.browser.newContext();
+    const t1 = await openHarness(context, 'follow-shared');
+    await online(t1.page);
+    const t2 = await openHarness(context, 'follow-shared');
+    const state = (t) =>
+      t.page.evaluate(() => ({
+        state: window.__h.client.connectionState,
+        link: window.__h.client.linkState,
+      }));
+    await waitFor(async () => (await state(t2)).link === 'online', 10_000, 'Tab 2 liest mit');
+    // Schreiber in einem eigenen Kontext (eigene Locks): steht für das iPad
+    const wctx = await ctx.browser.newContext();
+    const w = await openHarness(wctx, 'writer');
+    await online(w.page);
+    const nb = await createNotebook(w.page);
+    const head = await rest('GET', `/notebooks/${nb.notebookId}/pages`);
+    await t2.page.evaluate(({ s, seq, id }) => window.__follow(s, { lastSeq: seq, lastOpId: id }, null), {
+      s: nb.stream,
+      seq: head.stream_seq,
+      id: head.stream_op_id,
+    });
+    const got = () => t2.page.evaluate((s) => window.__h.received[s].length, nb.stream);
+    await w.page.evaluate((o) => window.__send(o), strokeOps(nb, 3));
+    const live1 = await waitFor(async () => (await got()) === 3, 5_000, 'Tab 2 bekommt 3 Striche').catch(
+      () => false,
+    );
+    check(
+      'Folge-Tab bekommt die Striche eines anderen Geräts live',
+      live1 && (await state(t2)).state === 'other_tab',
+      JSON.stringify(await state(t2)),
+    );
+    await t2.page.evaluate(() => window.__h.client.takeOver());
+    await online(t2.page);
+    await w.page.evaluate((o) => window.__send(o), strokeOps(nb, 2));
+    const live2 = await waitFor(async () => (await got()) === 5, 5_000, 'nach Übernahme').catch(() => false);
+    check('Nach „Hier übernehmen“ im lesenden Tab weiter live', live2);
+    await t1.page.evaluate(() => window.__h.client.takeOver());
+    await online(t1.page);
+    await waitFor(async () => (await state(t2)).link === 'online', 10_000, 'Tab 2 liest wieder mit');
+    await w.page.evaluate((o) => window.__send(o), strokeOps(nb, 2));
+    const live3 = await waitFor(async () => (await got()) === 7, 5_000, 'nach Rückgabe').catch(() => false);
+    check('Gibt der lesende Tab die Rolle wieder ab, bleibt er live (Mitlese-Verbindung)', live3);
+    const seqs = await t2.page.evaluate((s) => window.__h.received[s].map((x) => x.seq), nb.stream);
+    check(
+      'Lückenlos und ohne Doppelte',
+      seqs.every((x, i) => i === 0 || x === seqs[i - 1] + 1),
+      JSON.stringify(seqs),
+    );
+    check(
+      'Mitlese-Verbindungen senden keine Operationen',
+      framesOf(t1.sockets.slice(1), 'out', 'op').length === 0 &&
+        framesOf(t2.sockets, 'out', 'op').length === 0,
+    );
+    await wctx.close();
+    await context.close();
+  },
 };
 
 // ------------------------------------------------------------------ Lauf
@@ -650,7 +720,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
     // Playwright würde sonst selbst auf SIGINT/SIGTERM beenden, bevor aufgeräumt ist
     browser = await chromium.launch({ handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false });
     const ctx = { browser };
-    const order = ['app', 'acks', 'resumeAndReset', 'backoff4503', 'leader'];
+    const order = ['app', 'acks', 'resumeAndReset', 'backoff4503', 'leader', 'followerLive'];
     for (const name of order) {
       if (only && !only.includes(name)) continue;
       console.log(`\n== ${name}`);

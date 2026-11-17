@@ -1,5 +1,6 @@
-// Mehrere Tabs: Nur ein Tab (Leader) verbindet, sendet und empfängt. Die anderen Tabs synchronisieren nicht; sie zeigen
-// „in einem anderen Tab aktiv“ (OtherTabBanner) und können die Rolle per „Hier übernehmen“ (Web Locks `steal`) holen.
+// Mehrere Tabs: Nur ein Tab (Leader) sendet die Warteschlange. Die anderen Tabs senden nicht; sie lesen über eine eigene
+// Mitlese-Verbindung mit (Abos und Ereignisse, siehe SyncClient und VERTRAEGE §11.8), zeigen „in einem anderen Tab aktiv“
+// (OtherTabBanner) und können die Rolle per „Hier übernehmen“ (Web Locks `steal`) holen.
 // Der BroadcastChannel meldet nur „Leader hat gewechselt“, es werden keine Operationen weitergeleitet.
 
 export interface LeaderLockHandlers {

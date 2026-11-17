@@ -247,7 +247,9 @@ describe('Restfenster beim Leader-Wechsel', () => {
     const py = b.send(notebookCreate(2, uid(905))).catch(() => undefined);
     await settle();
     locks.holder?.handlers?.onEnqueued?.(); // Nachlesen steht hinter dem append in der Reihe
-    server.sockets[1]!.push({ type: 'ack', op_id: uid(904), stream: nbStream(1), seq: 1 }); // ack für X, Entfernen dahinter
+    // Leader-Verbindung von b (daneben gibt es Mitlese-Verbindungen der Folge-Tabs, §11.8)
+    const bLink = server.sockets.find((s, i) => i > 0 && s.of('op').length > 0)!;
+    bLink.push({ type: 'ack', op_id: uid(904), stream: nbStream(1), seq: 1 }); // ack für X, Entfernen dahinter
     await settle();
     g.open();
     await settle();

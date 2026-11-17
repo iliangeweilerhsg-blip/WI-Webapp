@@ -22,7 +22,8 @@ Postgres 16. Das Skript ist **nicht** Teil der CI.
 | `acks` | 120 parallele `stroke.add`: `ack`s in Sendereihenfolge, `seq` lückenlos, Serverstand, Warteschlange leer. |
 | `resumeAndReset` | Verbindungsabbruch (clientseitig, `close(4000)`) bei laufendem Schreiber: `hello` mit `last_seq`/`last_op_id`, `welcome` mit `from_seq`, Nachlieferung ohne Lücke und Duplikate. Dann `reset` über eine unbekannte Position: Handler, `subscribed` mit `reset = true`, danach nur neue Operationen. |
 | `backoff4503` | Echter 4503: `session.start` hat auf `main` noch keinen Handler (`internal_error`, `handler_missing`, wiederholbar). Wartezeiten 1 s, 2 s, 4 s, 8 s, nach 5. Versuch Fehlerablage (`poison`), danach normale Operationen und Backoff-Reset nach einem `ack`. |
-| `leader` | Zwei Tabs im selben Kontext (gemeinsame IndexedDB und Locks): Rollen, genau eine Verbindung, 10 Wechsel per `takeOver()` mitten im Senden von je 60 Strichen, Übernahme beim Schließen des Leader-Tabs. Prüft, dass genau die bestätigten und übergebenen Striche auf dem Server liegen und nichts, was `SyncNotLeaderError` meldete. |
+| `leader` | Zwei Tabs im selben Kontext (gemeinsame IndexedDB und Locks): Rollen, je Tab eine Verbindung (Leader und Mitlese-Verbindung ohne Operationen), 10 Wechsel per `takeOver()` mitten im Senden von je 60 Strichen, Übernahme beim Schließen des Leader-Tabs. Prüft, dass genau die bestätigten und übergebenen Striche auf dem Server liegen und nichts, was `SyncNotLeaderError` meldete. |
+| `followerLive` | Folge-Tab abonniert einen Notizbuch-Strom, ein Schreiber in einem anderen Kontext (wie das iPad) schreibt Striche: Der Folge-Tab bekommt sie live über seine Mitlese-Verbindung, auch nach „Hier übernehmen“ und nach Rückgabe der Rolle; lückenlos, ohne Doppelte, Mitlese-Verbindungen senden keine Operation (Owner-Meldung vom 17.11.). |
 
 ## Aufruf
 

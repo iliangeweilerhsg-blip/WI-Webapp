@@ -121,6 +121,21 @@ export class FakeServer {
     return msg;
   }
 
+  /**
+   * Verteilt eine Nachricht wie der Core an alle offenen Verbindungen, die den Strom per `hello` oder `subscribe`
+   * gemeldet haben (ohne `stream`: an alle offenen Verbindungen, z. B. Ereignisse).
+   */
+  fanOut(msg: Msg): void {
+    const stream = typeof msg.stream === 'string' ? msg.stream : null;
+    for (const s of this.sockets) {
+      if (s.readyState !== 1 || s.closedByClient !== null) continue;
+      const streams = [...s.of('hello'), ...s.of('subscribe')].flatMap(
+        (m) => (m.streams as { stream: string }[]) ?? [],
+      );
+      if (stream === null || streams.some((x) => x.stream === stream)) s.push(msg);
+    }
+  }
+
   private resume(positions: Msg[]): Msg[] {
     return positions.map((p) => {
       const stream = p.stream as string;
