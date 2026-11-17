@@ -1,7 +1,8 @@
 // Ende-zu-Ende „Folien in der Vorlesung“ (Plan FOLIEN-SESSION, F5; VERTRAEGE §22): die REST-Abfolge, die die Web-App
 // in der Vorlesung geht, gegen den echten Core mit echter Datenbank. Im Repo gibt es keine Browser-Testumgebung
 // (kein Playwright), darum läuft der Ablauf auf Core-Ebene: deck-options → Start → slide.change → PATCH 409.
-// Der Folienwechsel geht wie im Sync-Server über preLock, `appendOp` und den Session-Handler.
+// Der Folienwechsel geht wie im Sync-Server (`sync/connection.ts`) über die Registry: `getOpRegistration`, dann
+// `preLock` (falls der Handler eines hat), `appendOp` und der Handler.
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -16,7 +17,7 @@ import type { Tx } from '../../src/db/client.ts';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
 import { setSessionEventPublisher } from '../../src/services/sessions.ts';
 import { appendOp } from '../../src/sync/append.ts';
-import { SESSION_HANDLERS, SESSION_PRELOCKS } from '../../src/sync/handlers/session.ts';
+import { getOpRegistration } from '../../src/sync/handlers.ts';
 import { startTestApp, type TestApp } from './helpers.ts';
 
 const API = '/api/v1';
@@ -106,7 +107,7 @@ const updatedFor = (id: string) =>
 const slideEvents = async (id: string) =>
   (await t.handle.sql`SELECT 1 FROM slide_event WHERE session_id = ${id} AND deleted_at IS NULL`).length;
 
-/** Folienwechsel eines Tabs wie im Sync-Server: preLock (falls vorhanden), `appendOp`, Handler */
+/** Folienwechsel eines Tabs wie im Sync-Server: Registrierung per `getOpRegistration`, preLock (falls vorhanden), `appendOp`, Handler */
 function slideChange(sessionId: string, slideIndex: number) {
   const op = SyncOpSchema.parse({
     type: 'op',
@@ -125,8 +126,9 @@ function slideChange(sessionId: string, slideIndex: number) {
     },
   });
   return t.handle.db.transaction(async (tx: Tx) => {
-    const preLock = SESSION_PRELOCKS[op.kind];
-    if (preLock) await preLock(tx, op);
+    const registration = getOpRegistration(op.kind);
+    if (!registration) throw new Error(`Kein Handler für ${op.kind} registriert`);
+    if (registration.preLock) await registration.preLock(tx, op);
     await appendOp(tx, op.stream, {
       kind: op.kind,
       data: op.data,
@@ -135,7 +137,7 @@ function slideChange(sessionId: string, slideIndex: number) {
       origin: 'web',
       opId: op.op_id,
     });
-    await SESSION_HANDLERS[op.kind]!(tx, op, { deviceId: null, origin: 'web' });
+    await registration.handler(tx, op, { deviceId: null, origin: 'web' });
   });
 }
 
@@ -196,6 +198,31 @@ describe('Folien in der Vorlesung, Ende zu Ende (§22)', () => {
     expect(updatedFor(ses)).toHaveLength(0);
     // Derselbe Satz noch einmal ist kein Wechsel und bleibt erlaubt
     expect((await call('PATCH', `/sessions/${ses}`, { slide_deck_id: newer })).statusCode).toBe(200);
+  });
+
+  it('Belegter neuester Satz wird nicht vorgeschlagen: der Vorschlag ist der ältere freie Satz', async () => {
+    const older = await mkDeck('Satz alt');
+    const newer = await mkDeck('Satz neu');
+    // Der neueste Satz hängt an einer anderen Vorlesung in belegendem Zustand (`beendet` belegt weiter)
+    const s = t.handle.sql;
+    const otherId = uuidv7();
+    await s`INSERT INTO session ${s({
+      id: otherId,
+      ...base,
+      module_id: mod,
+      state: 'beendet',
+      slide_deck_id: newer,
+      started_at: nextTime(),
+      ended_at: nextTime(),
+    })}`;
+    const ses = await mkReadySession();
+
+    const opts = await options(ses);
+    expect(opts.suggested_deck_id).toBe(older);
+    const byId = new Map(opts.items.map((o) => [o.deck.id, o]));
+    expect(byId.get(newer)?.free).toBe(false);
+    expect(byId.get(newer)?.used_by.map((u) => u.session_id)).toEqual([otherId]);
+    expect(byId.get(older)).toMatchObject({ free: true, used_by: [] });
   });
 
   it('Ohne Folien starten, später kommt ein Satz: die Live-Ansicht bietet ihn an, Übernehmen setzt ihn', async () => {

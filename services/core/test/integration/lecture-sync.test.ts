@@ -234,6 +234,10 @@ describe('SessionTickResult und afterTick (17.8)', () => {
     // Über die API lässt sich eine aktive Session nicht löschen; die Zeile gilt trotzdem als gelöscht
     await t.handle.sql`UPDATE session SET deleted_at = now() WHERE id = ${third}`;
     expect((await tick(T(13))).activeWithoutDeck).toEqual([]);
+    // Nur die gelöschte Zeile in A, daneben eine aktive in B (session_one_active_uq gilt nur für nicht gelöschte):
+    // Ohne `notDeleted(session)` in der Abfrage stünde A mit in der Liste. Der frühe Ausstieg verdeckt das allein.
+    await mkSession({ state: 'laeuft', startedAt: T(14), moduleId: modB });
+    expect((await tick(T(15))).activeWithoutDeck).toEqual([modB]);
   });
 
   it('Fall 4: ein gelöschter oder fremder Satz zählt nicht als gültig', async () => {
