@@ -3041,6 +3041,7 @@ Die Form ist eine Kette aus Kapseln, als Vereinigung einfacher Teilflächen in *
 - **Geschätzt bleibt**, wie stark die Breite um diesen Mittelwert schwankt (hier: linear mit dem Druck). Der Durchmesser ist `width × (1 − thinning × (1 − 2 × Druck))`, beim Druck 1 also `(1 + thinning) × width`: Füller bis `2 × width`, Bleistift bis `1,7 × width`. Wo das iPad `force` bei 1 abgeschnitten hat, fehlt die Information.
 - **Kugelschreiber (`pen`) schwankt weniger:** Mit `thinning` 0,85 käme er auf bis zu `1,85 × width`. Das passt nicht zu einem Stift, der auf dem iPad fast gleichmäßig schreibt. Für `pen` wird der Druck darum zusätzlich auf 0,3 bis 0,7 begrenzt. Der Durchmesser bleibt so zwischen `0,66 × width` und `1,34 × width`.
 - `monoline` und `marker` bleiben unverändert. Dort ist der Durchmesser schon `width`.
+- **Einzelpunkt (alle Werkzeuge, mit V2-5):** Ein v1-Strich, dessen Punkte alle weniger als 0,01 pt auseinanderliegen, wird wie bei v2 als Scheibe mit Durchmesser `width` gezeichnet, beim Textmarker als Quadrat mit Kante `width`. Bis dahin zeichnete der Füller dort nichts und die übrigen Werkzeuge eine zu kleine Form. Ein getipptes Füller-Pünktchen mit leichtem Zittern (Punkte weiter als 0,01 pt auseinander) bleibt noch zu klein; das klärt ein eigenes Ticket.
 - Die künstlichen Testdaten 01 bis 07 werden dadurch etwa um den Faktor 1,6 dicker. Tests mit festen Breiten werden angepasst.
 
 ### 23.9 Tickets und Besitz
