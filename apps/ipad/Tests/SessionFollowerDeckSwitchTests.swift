@@ -277,4 +277,54 @@ final class SessionFollowerDeckSwitchTests: XCTestCase {
         XCTAssertNotNil(support.decks.info(forDeck: "deck-b"))
         XCTAssertEqual(transport.downloadRequests.count, 2)
     }
+
+    /// Hält eine Anfrage an, bis der Test sie freigibt (kein Sleep)
+    @MainActor
+    private final class RequestGate {
+        private(set) var reached = false
+        private var released = false
+        private var continuation: CheckedContinuation<Void, Never>?
+
+        func hold() async {
+            reached = true
+            if released { return }
+            await withCheckedContinuation { (next: CheckedContinuation<Void, Never>) in
+                continuation = next
+            }
+        }
+
+        func release() {
+            released = true
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
+    func testASwitchDuringTheDownloadNeverReturnsASlideOfTheOldDeck() async {
+        let rig = makeRig(deck: "deck-a", slide: SlideBrief(slideID: nil, index: 2))
+        await connect(rig)
+        let transport = makeDeckTransport()
+        let gate = RequestGate()
+        // Die Metadaten von Satz A kommen erst, wenn der Test freigibt; alles andere läuft sofort
+        transport.duringRequest = { request in
+            if (request.url?.path ?? "").hasSuffix("/slide-decks/deck-a") { await gate.hold() }
+        }
+        let support = makeSupport(follower: rig.follower, transport: transport)
+
+        // Während `currentSlide()` an Satz A hängt, wechselt der Satz auf B, danach läuft der Download von A weiter
+        let switcher = _Concurrency.Task { @MainActor in
+            let held = await eventually { gate.reached }
+            rig.feed.deliver(.sessionUpdated(self.brief(deck: "deck-b", updated: 2000)))
+            gate.release()
+            return held
+        }
+        let slide = await support.currentSlide()
+        let held = await switcher.value
+
+        XCTAssertTrue(held)
+        XCTAssertEqual(rig.follower.running?.slideDeckID, "deck-b")
+        // Keine Folie aus A: Die Position wird im neuen Satz aufgelöst
+        XCTAssertEqual(slide?.id, "deck-b-2")
+        XCTAssertNotNil(support.decks.info(forDeck: "deck-b"))
+    }
 }
