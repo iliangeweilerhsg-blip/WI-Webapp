@@ -463,9 +463,13 @@ describe('Strichformat v2: Form aus dem Durchmesser je Punkt', () => {
     }
     return a;
   };
+  const triArea = (t: ArrayLike<number>, o: number) =>
+    (t[o + 2]! - t[o]!) * (t[o + 5]! - t[o + 1]!) - (t[o + 4]! - t[o]!) * (t[o + 3]! - t[o + 1]!);
 
   it('1. alle Teilflächen haben positiven Umlaufsinn, Kreise entstehen mit arc(…, false)', () => {
     const ctx = document.createElement('canvas').getContext('2d')!;
+    let trisSeen = 0;
+    let maxTriArea = 0;
     // Datei 08, dazu Kurven in beide Drehrichtungen (die Eckenfolge der Trapeze hängt von der Richtung ab)
     const curves = [
       make([
@@ -493,6 +497,13 @@ describe('Strichformat v2: Form aus dem Durchmesser je Punkt', () => {
         marker,
       ),
       make([[5, 5, 8]], marker),
+      // Sanfter Zickzack (Knicke um 6°): Hier entfallen Scheiben und es entstehen Fasen mit echter Fläche, auf beiden Seiten
+      // und in beide Drehrichtungen
+      make(Array.from({ length: 12 }, (_, i): [number, number, number] => [i * 6, i % 2 ? 0.3 : 0, 9])),
+      make(
+        Array.from({ length: 12 }, (_, i): [number, number, number] => [i * 6, i % 2 ? -0.3 : 0, 9]),
+        marker,
+      ),
     ];
     for (const s of [...v2files, ...curves]) {
       const d = dec(s);
@@ -500,10 +511,22 @@ describe('Strichformat v2: Form aus dem Durchmesser je Punkt', () => {
       const sh = strokeShape(d);
       expect(sh.circles.length + sh.quads.length).toBeGreaterThan(0);
       for (let i = 0; i < sh.quads.length; i += 8) expect(area(sh.quads, i), s.client_id).toBeGreaterThan(0);
+      // Fasen-Dreiecke: ebenfalls positiver Umlaufsinn (entartete mit Fläche 0 bis auf Rundung), sonst löschen sie unter
+      // `nonzero` Fläche aus
+      for (let i = 0; i < sh.tris.length; i += 6)
+        expect(triArea(sh.tris, i), s.client_id).toBeGreaterThan(-1e-9); // entartete Fasen: Fläche 0 bis auf Rundung
+      trisSeen += sh.tris.length / 6;
+      for (let i = 0; i < sh.tris.length; i += 6) maxTriArea = Math.max(maxTriArea, triArea(sh.tris, i));
       log.reset();
       drawStroke(ctx, d);
       for (const c of log.calls.filter((c) => c.name === 'arc')) expect(c.args[5]).toBe(false);
+      // Jede Teilfläche (Kreis, Trapez, Dreieck) beginnt mit genau einem moveTo, also wird auch jedes Dreieck gezeichnet
+      const moves = log.calls.filter((c) => c.name === 'moveTo').length;
+      expect(moves, s.client_id).toBe(sh.circles.length / 3 + sh.quads.length / 8 + sh.tris.length / 6);
     }
+    // Die Testdaten müssen Fasen mit echter Fläche enthalten, sonst prüfen die Zeilen oben nichts
+    expect(trisSeen).toBeGreaterThan(0);
+    expect(maxTriArea).toBeGreaterThan(1e-3);
   });
 
   it('2. gerader Strich 100 pt, Durchmesser 2 auf 6: Breite 2, 4, 6 (±0,1) an Anfang, Mitte, Ende', () => {
