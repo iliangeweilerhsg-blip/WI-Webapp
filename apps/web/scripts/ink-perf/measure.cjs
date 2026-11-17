@@ -84,7 +84,9 @@ function loadStrokes() {
     // leicht versetzt, damit sich die Kopien über die Seite verteilen
     const dx = (copy * 37) % 300;
     const dy = (copy * 53) % 500;
-    return { ...s, client_id: id, transform: [1, 0, 0, 1, dx, dy] };
+    // die Transformation der Vorlage bleibt (auch Skalierung), nur die Verschiebung kommt dazu
+    const [a, b, c, d, e, f] = s.transform ?? [1, 0, 0, 1, 0, 0];
+    return { ...s, client_id: id, transform: [a, b, c, d, e + dx, f + dy] };
   };
   const strokes = Array.from({ length: nStrokes }, (_, i) => make(i));
   const reserve = Array.from({ length: nFrames + 5 }, (_, i) => make(nStrokes + i));

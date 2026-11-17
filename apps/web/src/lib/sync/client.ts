@@ -92,7 +92,6 @@ export interface SyncClientOptions {
   clockSyncTimeoutMs?: number;
 }
 
-/** Dieser Tab ist nicht der Sync-Tab (ein anderer Tab hält die Verbindung). */
 const WELCOME_KEYS: ReadonlySet<string> = new Set(Object.keys(SyncWelcomeSchema.shape));
 
 /**
@@ -107,6 +106,7 @@ function withoutUnknownWelcomeKeys(json: unknown): unknown {
   return Object.fromEntries(Object.entries(o).filter(([k]) => WELCOME_KEYS.has(k)));
 }
 
+/** Dieser Tab ist nicht der Sync-Tab (ein anderer Tab hält die Verbindung). */
 export class SyncNotLeaderError extends Error {
   constructor(message = 'Studien-Gehirn ist in einem anderen Tab aktiv.') {
     super(message);

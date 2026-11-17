@@ -3008,6 +3008,7 @@ Die Form ist eine Kette aus Kapseln, als Vereinigung einfacher Teilflächen in *
    - je Abschnitt `k = min(64, ceil(Länge / 1,5) − 1)` Zwischenpunkte,
    - je Strich insgesamt höchstens 5 000 Zwischenpunkte. Ergäbe die Summe mehr, werden alle `k` mit demselben Faktor verkleinert (abgerundet),
    - bei mehr als 5 000 Punkten im Strich entfällt das Verdichten.
+   - **Rand:** Am ersten und letzten Punkt fehlt ein Nachbar. Dort dient der am Endpunkt gespiegelte Nachbar als Hilfspunkt (`2·P0 − P1`), damit ein einzelner Abschnitt gerade bleibt.
 3. **Scheiben:** je Punkt ein Kreis mit Radius `diam / 2`. Die Scheiben bilden runde Verbindungen und runde Enden. Vor jedem `arc` steht ein `moveTo(x + r, y)`, damit kein Verbindungsstrich vom vorigen Teilpfad zum Kreis entsteht. Danach `closePath()`.
 4. **Trapeze:** je Abschnitt ein Viereck zwischen den **äußeren Tangenten** der beiden Kreise, nicht entlang der Normalen des Abschnitts. Versetzt man nur entlang der Normalen, liegt das Viereck bei wechselndem Radius innerhalb der Kreise, und der Umriss bekommt kleine Einbuchtungen. Mit `u` = Einheitsvektor von Punkt 0 zu Punkt 1, `n` = dessen Normale, `d` = Abstand, `r0`, `r1` = Radien:
    - `s = (r0 − r1) / d`, `c = sqrt(1 − s²)`,
@@ -3016,10 +3017,18 @@ Die Form ist eine Kette aus Kapseln, als Vereinigung einfacher Teilflächen in *
 5. **Umlaufsinn:** Alle Teilflächen haben denselben Umlaufsinn. Die Trapeze werden so geordnet, dass die Summe `Σ (x_i · y_{i+1} − x_{i+1} · y_i)` positiv ist, die Kreise entstehen mit `ctx.arc(…, false)`. Mit der Füllregel `nonzero` ergibt das die Vereinigung: keine Löcher an engen Kurven und keine doppelte Deckung bei durchscheinender Farbe.
 6. **Ein `fill()` je Strich**, wie bisher.
 
-- **Textmarker** (`cap: false`): keine Scheibe am ersten und am letzten Punkt, damit die Enden stumpf bleiben. Ein Textmarker aus einem einzigen Punkt wird als Quadrat mit der Kantenlänge des Durchmessers gezeichnet.
+**Abweichung von der wörtlichen Form (Lead-Entscheidung, Messung in Chromium bei 8 px/pt):** Der Renderer darf Scheiben und Punkte weglassen, solange die Abweichung höchstens `discTolerance` (0,02 pt) bzw. 1 Gerätepixel beträgt. Der Test vergleicht gegen die wörtliche Form.
+
+- **(a)** Fast gerade Zwischenpunkte der verdichteten Kette dürfen zusammengefasst werden (`simplifyChain`: Abweichung von der Geraden höchstens `discTolerance`, Durchmesser höchstens `2 × discTolerance` vom linearen Verlauf, nie über eine Umkehr). An einer Biegung, deren Scheibe höchstens `discTolerance` von der Sehne abweicht (`r · (1 − cos(θ/2)) ≤ discTolerance`), darf die Scheibe durch eine **Fase** ersetzt werden: zwei Dreiecke je Biegung, je Seite `P, P + r·t(j−1), P + r·t(j)` (`t` = Berührpunkt der äußeren Tangente des angrenzenden Abschnitts), mit positivem Umlaufsinn. Ohne die Fase bliebe der ganze Keil vom Mittelpunkt bis zum Rand offen (Abweichung ≈ `√(2·tol·r)`, gemessen bis 0,5 pt und 15 % fehlende Pixel beim Textmarker), mit ihr nur das Kreissegment.
+- **(b)** Textmarker-Enden: Scheiben der Folgepunkte, die über die Endkante hinausragen, entfallen auch bei `discTolerance` 0 und werden durch Fasen ersetzt.
+- **(c)** Catmull-Rom am Rand mit gespiegeltem Hilfspunkt (siehe Verdichten).
+- **(d)** `strokeBounds` bei v2 aus der verdichteten Kette (Rechteck der Mittelpunkte, auch der eingefügten, die Kurve kann über die Eingabepunkte hinausschwingen), nicht aus den Eingabepunkten, plus halber größter Durchmesser plus 2 pt.
+- **(e)** Liegt am Textmarker-Ende ein Kreis im anderen (kein Trapez, 4.), bleibt die Scheibe stehen.
+
+- **Textmarker** (`cap: false`): keine Scheibe am ersten und am letzten Punkt, damit die Enden stumpf bleiben (Ausnahme (e), Folgepunkte (b)). Ein Textmarker aus einem einzigen Punkt wird als Quadrat mit der Kantenlänge des Durchmessers gezeichnet.
 - **Ein einzelner Punkt** sonst: eine Scheibe.
 - **Deckkraft und Farbe** wie bisher (`color`, `ToolStyle.alpha`). `size`, `thinning`, `floor` und `taper` gelten bei v2 nicht: Auslaufende Enden stecken schon in den Größen.
-- **`strokeBounds`:** Rand bei v2 = halber größter Durchmesser des Strichs + 2 pt.
+- **`strokeBounds`:** Rand bei v2 = halber größter Durchmesser des Strichs + 2 pt (um die Kette, siehe (d)).
 - Das Ergebnis wird je Strich einmal berechnet und gemerkt, wie `outlines`.
 
 **Annahme A1 (nicht am Gerät gemessen):** `max(width, height)` ist der sichtbare Durchmesser, und `size` ist in pt. Dieselbe Annahme steckt heute schon in `stroke.width`. Zeigt der Vergleich am Gerät (23.10) beim Füller oder Textmarker eine Breite, die von der Richtung abhängt, folgt ein Web-Ticket, das `width`, `height` und `azimuth` als schräge Spitze auswertet. Das Format reicht dafür.

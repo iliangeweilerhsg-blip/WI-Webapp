@@ -861,7 +861,14 @@ describe('Strichformat v2: Form aus dem Durchmesser je Punkt', () => {
   });
 });
 
+// Der Standard der Toleranz, wie ihn 23.8 festlegt; die Tests prüfen ihn mit, damit eine Änderung auffällt
+const DEFAULT_TOL = 0.02;
+
 describe('Strichformat v2: überflüssige Scheiben und Zwischenpunkte entfallen (Toleranz 0,02 pt)', () => {
+  it('der Standard der Toleranz ist 0,02 pt', () => {
+    expect(SHAPE_TUNING.discTolerance).toBe(DEFAULT_TOL);
+  });
+
   const id = (n: number) => `019a4e14-0000-7000-8000-${String(n).padStart(12, '0')}`;
   const base = files[0]!.strokes[0]!;
   const make = (pts: readonly (readonly [number, number, number])[], extra: Partial<Stroke> = {}): Stroke => {
@@ -899,19 +906,24 @@ describe('Strichformat v2: überflüssige Scheiben und Zwischenpunkte entfallen 
   const inside = (sh: StrokeShape, x: number, y: number, margin = 0) => {
     for (let i = 0; i < sh.circles.length; i += 3)
       if (Math.hypot(x - sh.circles[i]!, y - sh.circles[i + 1]!) <= sh.circles[i + 2]! + margin) return true;
-    for (let i = 0; i < sh.quads.length; i += 8) {
-      let all = true;
-      for (let j = 0; j < 4 && all; j++) {
-        const k = (j + 1) % 4;
-        const ax = sh.quads[i + j * 2]!;
-        const ay = sh.quads[i + j * 2 + 1]!;
-        const ex = sh.quads[i + k * 2]! - ax;
-        const ey = sh.quads[i + k * 2 + 1]! - ay;
-        // alle Teilflächen laufen positiv, also liegt der Punkt links jeder Kante; cross / Kantenlänge = Abstand
-        all = ex * (y - ay) - ey * (x - ax) >= -margin * Math.hypot(ex, ey);
+    const polys: [ArrayLike<number>, number][] = [
+      [sh.quads, 4],
+      [sh.tris, 3],
+    ];
+    for (const [arr, m] of polys)
+      for (let i = 0; i < arr.length; i += m * 2) {
+        let all = true;
+        for (let j = 0; j < m && all; j++) {
+          const k = (j + 1) % m;
+          const ax = arr[i + j * 2]!;
+          const ay = arr[i + j * 2 + 1]!;
+          const ex = arr[i + k * 2]! - ax;
+          const ey = arr[i + k * 2 + 1]! - ay;
+          // alle Teilflächen laufen positiv, also liegt der Punkt links jeder Kante; cross / Kantenlänge = Abstand
+          all = ex * (y - ay) - ey * (x - ax) >= -margin * Math.hypot(ex, ey);
+        }
+        if (all) return true;
       }
-      if (all) return true;
-    }
     return false;
   };
 
@@ -995,5 +1007,145 @@ describe('Strichformat v2: überflüssige Scheiben und Zwischenpunkte entfallen 
       );
     }, 0);
     expect(total).toBeGreaterThan(100);
+  });
+
+  // Geometrie der Kerben: Ein Knick bei P, Streckenpunkte im Abstand 1 pt. Außen liegt P + 0,9·r·Winkelhalbierende
+  // (Normale der mittleren Richtung); dort muss die Form decken, denn der Strich überstreicht jeden Punkt im Abstand r
+  // von der Kurve, die durch P geht.
+  const marker = { tool: 'marker', layer: 'highlight', color: '#FFE06666' } as Partial<Stroke>;
+  const kinkStroke = (deg: number, diam: number, extra: Partial<Stroke> = {}, jitter = 0) => {
+    let seed = 11;
+    const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff - 0.5;
+    const a = (deg * Math.PI) / 180;
+    const pts: [number, number, number][] = [];
+    for (let i = -40; i <= 0; i++) pts.push([i, i === -40 || i === 0 ? 0 : jitter * rnd(), diam]);
+    for (let i = 1; i <= 40; i++)
+      pts.push([Math.cos(a) * i, Math.sin(a) * i + (i === 40 ? 0 : jitter * rnd()), diam]);
+    return make(pts, extra);
+  };
+  /** Punkte P + 0,9·r·n, dazu entlang der Kurve verschoben (|s| ≤ 0,3·r), n = Winkelhalbierende außen */
+  const outerProbes = (deg: number, r: number, at = 0): [number, number][] => {
+    const a = (deg * Math.PI) / 180;
+    // Kurve dreht nach unten (y wächst): außen ist oben (−y) um die mittlere Richtung
+    const mid = a / 2;
+    const [tx, ty] = [Math.cos(mid), Math.sin(mid)];
+    const [nx, ny] = [ty, -tx];
+    const out: [number, number][] = [];
+    for (let s = -0.3 * r; s <= 0.3 * r + 1e-9; s += 0.01)
+      out.push([at + tx * s + nx * 0.9 * r, ty * s + ny * 0.9 * r]);
+    return out;
+  };
+
+  it('Knick von 10° bis 20°: der Punkt P + 0,9·r·Winkelhalbierende (außen) ist gedeckt, bei r = 1 und r = 9', () => {
+    for (const deg of [10, 12, 15, 20])
+      for (const r of [1, 9]) {
+        // 0,05 pt: auch r = 9 lässt bei 10° die Scheibe weg; 0,02 pt: der Standard
+        for (const tol of [DEFAULT_TOL, 0.05]) {
+          const sh = withTolerance(tol, kinkStroke(deg, r * 2));
+          for (const [x, y] of outerProbes(deg, r))
+            expect(inside(sh, x, y), `${deg}° r=${r} tol=${tol} ${x}/${y}`).toBe(true);
+        }
+      }
+  });
+
+  it('Textmarker mit Zittern und Knick nahe dem Ende: die Teilflächen decken P + 0,9·r·Winkelhalbierende, auch bei Toleranz 0', () => {
+    const r = 9;
+    for (const tol of [0, DEFAULT_TOL])
+      for (const deg of [10, 20]) {
+        // Knick bei P = (0, 0), Zittern ±0,15 pt auf beiden Armen
+        const sh = withTolerance(tol, kinkStroke(deg, 2 * r, marker, 0.3));
+        for (const [x, y] of outerProbes(deg, r))
+          expect(inside(sh, x, y), `${deg}° tol=${tol} ${x}/${y}`).toBe(true);
+      }
+    // Knick 5 pt vor dem Ende: die Scheibe ragt über die Endkante und entfällt, die Fase schließt den Keil
+    for (const tol of [0, DEFAULT_TOL])
+      for (const deg of [10, 20]) {
+        const a = (deg * Math.PI) / 180;
+        const pts: [number, number, number][] = [];
+        for (let i = -40; i <= 0; i++) pts.push([i, 0, 2 * r]);
+        for (let i = 1; i <= 5; i++) pts.push([Math.cos(a) * i, Math.sin(a) * i, 2 * r]);
+        const sh = withTolerance(tol, make(pts, marker));
+        expect(sh.tris.length, `tol=${tol}`).toBeGreaterThan(0);
+        for (const [x, y] of outerProbes(deg, r))
+          expect(inside(sh, x, y), `Ende ${deg}° tol=${tol} ${x}/${y}`).toBe(true);
+      }
+  });
+
+  it('scharfe Biegungen behalten ihre Rundung: Spitzkehre und rechter Winkel decken P + 0,9·r rundum außen', () => {
+    const r = 4;
+    // Spitzkehre bei P = (50, 0): die Kappe ragt nach +x; rechter Winkel bei P = (30, 0): die Ecke ragt nach (+x, −y)
+    const cases: [[number, number, number][], [number, number], number, number][] = [
+      [
+        [
+          [0, 0, 2 * r],
+          [50, 0, 2 * r],
+          [10, 0, 2 * r],
+        ],
+        [50, 0],
+        -60,
+        60,
+      ],
+      [
+        [
+          [0, 0, 2 * r],
+          [30, 0, 2 * r],
+          [30, 30, 2 * r],
+        ],
+        [30, 0],
+        -80,
+        0,
+      ],
+    ];
+    for (const [pts, [px, py], from, to] of cases) {
+      const sh = withTolerance(DEFAULT_TOL, make(pts));
+      for (let deg = from; deg <= to; deg += 0.5) {
+        const t = (deg * Math.PI) / 180;
+        const [x, y] = [px + Math.cos(t) * 0.9 * r, py + Math.sin(t) * 0.9 * r];
+        expect(inside(sh, x, y), `${px}/${py} ${deg}°`).toBe(true);
+      }
+    }
+  });
+
+  it('Datei 08, Raster 0,05 pt: die Form mit Toleranz deckt die Form ohne bis auf höchstens 0,125 pt Rand', () => {
+    let tris = 0;
+    let probes = 0;
+    for (const s of v2files) {
+      const lit = withTolerance(0, s);
+      const sim = strokeShape(decodeStroke({ ...s })); // mit dem Standard der Toleranz
+      tris += sim.tris.length;
+      // Die Form ohne Toleranz ist eine Vereinigung; ihr Rand besteht aus Kreisbögen und Tangenten, und die Abweichung
+      // nimmt zum Rand hin zu. Darum genügt es, Kreise (Rand, 0,9·r, 0,5·r) und Trapezkanten dicht abzutasten.
+      for (let i = 0; i < lit.circles.length; i += 3) {
+        const [cx, cy, r] = [lit.circles[i]!, lit.circles[i + 1]!, lit.circles[i + 2]!];
+        for (const f of [1, 0.9, 0.5]) {
+          const steps = Math.max(8, Math.ceil((2 * Math.PI * r * f) / 0.05));
+          for (let k = 0; k < steps; k++) {
+            const t = (k / steps) * 2 * Math.PI;
+            probes++;
+            if (!inside(sim, cx + Math.cos(t) * r * f, cy + Math.sin(t) * r * f, 0.125))
+              expect.fail(`${s.client_id}: Kreis ${i / 3} f=${f} t=${t}`);
+          }
+        }
+      }
+      for (let i = 0; i < lit.quads.length; i += 8)
+        for (let j = 0; j < 4; j++) {
+          const k = (j + 1) % 4;
+          const [ax, ay, bx, by] = [
+            lit.quads[i + j * 2]!,
+            lit.quads[i + j * 2 + 1]!,
+            lit.quads[i + k * 2]!,
+            lit.quads[i + k * 2 + 1]!,
+          ];
+          const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / 0.05));
+          for (let q = 0; q <= steps; q++) {
+            probes++;
+            if (!inside(sim, ax + ((bx - ax) * q) / steps, ay + ((by - ay) * q) / steps, 0.125))
+              expect.fail(`${s.client_id}: Trapez ${i / 8} Kante ${j}`);
+          }
+        }
+    }
+    expect(probes).toBeGreaterThan(100000);
+    // Die Fasen sind im Spiel: ohne sie gäbe es hier nichts zu prüfen
+    expect(tris).toBeGreaterThan(0);
   });
 });

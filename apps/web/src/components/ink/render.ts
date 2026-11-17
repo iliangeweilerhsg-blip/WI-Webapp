@@ -155,6 +155,8 @@ export interface StrokeShape {
   circles: Float64Array;
   /** Vierecke: 8 Werte (x0, y0 … x3, y3) je Viereck */
   quads: Float64Array;
+  /** Fasen: 6 Werte (x0, y0 … x2, y2) je Dreieck. Je weggelassener Scheibe an einer Biegung zwei (je Seite eins) */
+  tris: Float64Array;
   /** Punkte der Kette nach Zusammenfassen und Verdichten (ohne Rücksicht auf weggelassene Enden) */
   chainLength: number;
   /** Zwischenpunkte, die das Verdichten eingefügt hat */
@@ -371,6 +373,28 @@ export function strokeShape(d: DecodedStroke): StrokeShape {
       if ((cd[j]! / 2) * (1 - Math.cos(turn / 2)) <= tol) skip[j] = true;
     }
   }
+  // Fasen: Wo eine Scheibe an einer Biegung entfällt, bliebe zwischen den beiden Trapezen ein Keil vom Mittelpunkt bis
+  // zum Rand offen (Abweichung ≈ √(2·tol·r), nicht nur r·(1 − cos(θ/2))). Je Seite ein Dreieck aus dem Mittelpunkt und
+  // den beiden Berührpunkten der äußeren Tangenten schließt ihn bis auf das Kreissegment.
+  const tris: number[] = [];
+  for (let j = 1; j + 1 < n; j++) {
+    if (!skip[j] || !hasQuad[j - 1] || !hasQuad[j]) continue;
+    const r = cd[j]! / 2;
+    for (const t of [tanA, tanB]) {
+      const p = [
+        cx[j]!,
+        cy[j]!,
+        cx[j]! + r * t[j - 1]![0]!,
+        cy[j]! + r * t[j - 1]![1]!,
+        cx[j]! + r * t[j]![0]!,
+        cy[j]! + r * t[j]![1]!,
+      ];
+      const area =
+        p[0]! * p[3]! - p[2]! * p[1]! + (p[2]! * p[5]! - p[4]! * p[3]!) + (p[4]! * p[1]! - p[0]! * p[5]!);
+      if (area < 0) tris.push(p[0]!, p[1]!, p[4]!, p[5]!, p[2]!, p[3]!);
+      else tris.push(...p);
+    }
+  }
   const circles: number[] = [];
   let maxDiam = 0;
   let x0 = Infinity;
@@ -401,6 +425,7 @@ export function strokeShape(d: DecodedStroke): StrokeShape {
   sh = {
     circles: Float64Array.from(circles),
     quads: Float64Array.from(quads),
+    tris: Float64Array.from(tris),
     chainLength: dense,
     filled: dense - n0,
     simplified: n,
@@ -415,7 +440,7 @@ function drawShape2(ctx: CanvasRenderingContext2D, d: DecodedStroke): void {
   const sh = strokeShape(d);
   ctx.fillStyle = rgba(d.color, d.color.a * styleOf(d).alpha);
   ctx.beginPath();
-  const { circles, quads } = sh;
+  const { circles, quads, tris } = sh;
   for (let i = 0; i < circles.length; i += 3) {
     const x = circles[i]!;
     const y = circles[i + 1]!;
@@ -430,6 +455,12 @@ function drawShape2(ctx: CanvasRenderingContext2D, d: DecodedStroke): void {
     ctx.lineTo(quads[i + 2]!, quads[i + 3]!);
     ctx.lineTo(quads[i + 4]!, quads[i + 5]!);
     ctx.lineTo(quads[i + 6]!, quads[i + 7]!);
+    ctx.closePath();
+  }
+  for (let i = 0; i < tris.length; i += 6) {
+    ctx.moveTo(tris[i]!, tris[i + 1]!);
+    ctx.lineTo(tris[i + 2]!, tris[i + 3]!);
+    ctx.lineTo(tris[i + 4]!, tris[i + 5]!);
     ctx.closePath();
   }
   ctx.fill('nonzero');
@@ -478,6 +509,15 @@ const bounds = new WeakMap<DecodedStroke, Rect>();
 export function strokeBounds(d: DecodedStroke): Rect {
   let r = bounds.get(d);
   if (r) return r;
+  if (d.diam) {
+    // v2: Mittelpunkte der Kette (auch die verdichteten, die Kurve kann über die Eingabepunkte hinausschwingen),
+    // dazu der halbe größte Durchmesser
+    const sh = strokeShape(d);
+    const pad = sh.maxDiam / 2 + 2;
+    r = { x0: sh.center.x0 - pad, y0: sh.center.y0 - pad, x1: sh.center.x1 + pad, y1: sh.center.y1 + pad };
+    bounds.set(d, r);
+    return r;
+  }
   let x0 = Infinity;
   let y0 = Infinity;
   let x1 = -Infinity;
@@ -489,15 +529,6 @@ export function strokeBounds(d: DecodedStroke): Rect {
     if (x > x1) x1 = x;
     if (y < y0) y0 = y;
     if (y > y1) y1 = y;
-  }
-  if (d.diam) {
-    // v2: Mittelpunkte der Kette (auch die verdichteten, die Kurve kann über die Eingabepunkte hinausschwingen),
-    // dazu der halbe größte Durchmesser
-    const sh = strokeShape(d);
-    const pad = sh.maxDiam / 2 + 2;
-    r = { x0: sh.center.x0 - pad, y0: sh.center.y0 - pad, x1: sh.center.x1 + pad, y1: sh.center.y1 + pad };
-    bounds.set(d, r);
-    return r;
   }
   const pad = d.width * Math.max(styleOf(d).size * 2, 1) + 2;
   r = { x0: x0 - pad, y0: y0 - pad, x1: x1 + pad, y1: y1 + pad };
