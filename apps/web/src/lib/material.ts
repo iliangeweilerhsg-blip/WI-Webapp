@@ -150,6 +150,9 @@ export function useDeckDetail(id: string, options: { enabled?: boolean } = {}) {
   });
 }
 
+/** Abstand der Abfrage von `deck-options`, wo ein neuer Satz von selbst auftauchen soll (§22.6, §22.7) */
+export const DECK_POLL_MS = 60_000;
+
 export const deckOptionsKey = (moduleId: string, sessionId: string | null) =>
   ['deck-options', moduleId, sessionId ?? ''] as const;
 

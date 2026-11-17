@@ -8,7 +8,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import type { Module, Session } from '@sg/shared';
 import { ApiRequestError, friendlyMessage } from '../../lib/api.ts';
-import { useDeckOptions } from '../../lib/material.ts';
+import { DECK_POLL_MS, useDeckOptions } from '../../lib/material.ts';
 import {
   ACTIVE_SESSION_KEY,
   applyActiveSession,
@@ -111,8 +111,14 @@ function useSpontaneousStart(onSession?: (session: Session) => void) {
  * als Zeile unter dem Modul und geht als `slide_deck_id` in `POST /sessions` mit; „Ohne Folien“ ist ein Klick.
  * Keine Liste: Wer einen anderen Satz will, wählt ihn in der Live-Ansicht. Der Start wartet nie auf die Abfrage.
  */
-function useSpontaneousDeck(moduleId: string, enabled = true) {
-  const query = useDeckOptions(moduleId, null, { enabled });
+function useSpontaneousDeck(moduleId: string, enabled = true, busy = false) {
+  // Wie auf der Start-Karte (§22.7): neuer Satz beim Sichtbarwerden und alle 60 s im sichtbaren Tab, nicht beim Anlegen
+  const poll = enabled && !busy;
+  const query = useDeckOptions(moduleId, null, {
+    enabled,
+    refetchOnVisible: poll,
+    refetchInterval: poll ? DECK_POLL_MS : false,
+  });
   const [none, setNone] = useState(false);
   useEffect(() => setNone(false), [moduleId]);
   const suggestedId = query.data?.suggested_deck_id ?? null;
@@ -191,7 +197,7 @@ interface BodyProps {
 }
 
 function SpontaneousCardBody({ modules, selected, onChoose, start, busy, error }: BodyProps) {
-  const deck = useSpontaneousDeck(selected);
+  const deck = useSpontaneousDeck(selected, true, busy);
 
   return (
     <section aria-labelledby="spontan-title" className="rounded-lg border border-border bg-surface px-4 py-4">
@@ -242,7 +248,7 @@ export function ModuleSessionButton({ moduleId }: { moduleId: string }) {
   const { start, busy, error } = useSpontaneousStart();
   const running = active.data ?? null;
   // Läuft schon eine Session, gibt es hier nichts zu starten und nichts abzufragen
-  const deck = useSpontaneousDeck(moduleId, !active.isPending && running === null);
+  const deck = useSpontaneousDeck(moduleId, !active.isPending && running === null, busy);
   if (active.isPending) return null;
 
   return (

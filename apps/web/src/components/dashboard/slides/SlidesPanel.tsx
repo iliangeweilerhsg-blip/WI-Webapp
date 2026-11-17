@@ -14,6 +14,7 @@ import {
   pageThumbUrl,
   useDeckDetail,
   useDeckOptions,
+  DECK_POLL_MS,
 } from '../../../lib/material.ts';
 import { sessionStreamId, sessionTimeMs, syncedNowMs } from '../../../lib/session-stream.ts';
 import { isEditableTarget } from '../../../lib/shortcuts.ts';
@@ -40,7 +41,7 @@ export interface SlidesPanelProps {
 }
 
 /** Abstand der Abfrage von `deck-options` in der Live-Ansicht, mit und ohne Satz (VERTRAEGE §22.6) */
-export const DECK_OFFER_POLL_MS = 60_000;
+export const DECK_OFFER_POLL_MS = DECK_POLL_MS;
 
 const NO_SESSION_UPDATE = () => undefined;
 
