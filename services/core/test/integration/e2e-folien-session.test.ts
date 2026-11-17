@@ -167,9 +167,8 @@ describe('Folien in der Vorlesung, Ende zu Ende (§22)', () => {
     expect([live.state, live.slide_deck_id]).toEqual(['laeuft', newer]);
     expect(await slideEvents(ses)).toBe(0);
     // Das iPad erfährt den Satz über session.updated
-    expect(updatedFor(ses).some((e) => e.data.slide_deck_id === newer && e.data.state === 'laeuft')).toBe(
-      true,
-    );
+    const pushed = updatedFor(ses).map((e) => SessionSchema.parse(e.data));
+    expect(pushed.some((e) => e.slide_deck_id === newer && e.state === 'laeuft')).toBe(true);
     const afterStart = await options(ses);
     expect(afterStart.current_deck_id).toBe(newer);
     expect(afterStart.lock).toBeNull();
