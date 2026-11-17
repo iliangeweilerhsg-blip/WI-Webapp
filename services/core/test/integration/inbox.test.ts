@@ -557,6 +557,7 @@ describe('A2: zusammenführen', () => {
     const res = await reopen('i1');
     expect(res.statusCode).toBe(409);
     expect(errorOf(res)?.code).toBe('inbox_reopen_conflict');
+    expect(errorOf(res)?.details).toEqual({ reason: 'relation', item_id: refId('ib') });
     expect(await world.snapshot()).toEqual(before);
 
     // Erst die Beziehung zurück, dann geht auch die Zusammenführung zurück
@@ -567,6 +568,131 @@ describe('A2: zusammenführen', () => {
       toId: refId('x'),
       confirmed: false,
       proposalSessionId: refId('s1'),
+    });
+  });
+
+  // T2-22c (#324, §20.6 „Rückgängig nach A2 mit angenommener Folge-Beziehung“): `r1` = `rb` (p → x, baut_auf, Eintrag
+  // `ib`), `r0` = t – x `verwandt`, die es nach dem Umhängen an T schon gibt
+  describe('Rückgängig mit angenommener Folge-Beziehung (T2-22c)', () => {
+    async function expectRelationConflict(ref: string, itemRef: string) {
+      const before = await world.snapshot();
+      const res = await reopen(ref);
+      expect(res.statusCode, res.body).toBe(409);
+      expect(errorOf(res)?.code).toBe('inbox_reopen_conflict');
+      expect(errorOf(res)?.details).toEqual({ reason: 'relation', item_id: refId(itemRef) });
+      expect(await world.snapshot()).toEqual(before);
+    }
+
+    async function expectBackAtP() {
+      expect(await world.relationRow('rb')).toMatchObject({
+        fromId: refId('p'),
+        toId: refId('x'),
+        kind: 'baut_auf',
+        confirmed: false,
+      });
+      expect((await world.itemRow('ib')).status).toBe('offen');
+      expect((await world.itemRow('i1')).status).toBe('offen');
+      expect((await world.conceptRow('p')).status).toBe('vorschlag');
+    }
+
+    it('1: Dublette an bestätigter r0: 409 mit details, nichts ändert sich, nach reopen von ib geht es', async () => {
+      await seed();
+      await world.relation('r0', { from: 't', to: 'x', kind: 'verwandt', confirmed: true });
+      ok(await accept('i1'));
+      ok(await accept('ib', { relation_kind: 'verwandt' }));
+      expect((await world.itemRow('ib')).decision?.duplicate_of).toBe(refId('r0'));
+      await expectRelationConflict('i1', 'ib');
+
+      ok(await reopen('ib'));
+      ok(await reopen('i1'));
+      await expectBackAtP();
+    });
+
+    it('2: Dublette bestätigt r0 mit: 409 nennt ib (nicht i0), reopen von ib öffnet i0 mit', async () => {
+      await seed();
+      await world.relation('r0', { from: 't', to: 'x', kind: 'verwandt', session: 's2' });
+      await world.item('i0', { kind: 'relation', relation: 'r0', session: 's2' });
+      ok(await accept('i1'));
+      ok(await accept('ib', { relation_kind: 'verwandt' }));
+      expect((await world.relationRow('r0')).confirmed).toBe(true);
+      await expectRelationConflict('i1', 'ib');
+
+      expect(ok(await reopen('ib')).also_changed).toEqual([refId('i0')]);
+      expect(await world.relationRow('r0')).toMatchObject({
+        confirmed: false,
+        proposalSessionId: refId('s2'),
+      });
+      ok(await reopen('i1'));
+      await expectBackAtP();
+    });
+
+    it('4: mehrere angenommene Einträge (bestätigt, mit duplicate_of): die kleinste ID gewinnt', async () => {
+      await seed();
+      await world.relation('r0', { from: 't', to: 'x', kind: 'verwandt', confirmed: true });
+      ok(await accept('i1'));
+      ok(await accept('ib', { relation_kind: 'verwandt' }));
+      ok(await accept('ia'));
+      expect((await world.relationRow('ra')).confirmed).toBe(true);
+      expect((await world.itemRow('ib')).decision?.duplicate_of).toBe(refId('r0'));
+      await expectRelationConflict('i1', 'ia');
+    });
+
+    it('5: ein abgelehnter umgehängter Eintrag sperrt nicht, seine Zeile geht zurück an P', async () => {
+      await seed();
+      ok(await accept('i1'));
+      ok(await reject('ib'));
+      expect(await world.relationRow('rb')).toMatchObject({ fromId: refId('t'), toId: refId('x') });
+      ok(await reopen('i1'));
+      expect(await world.relationRow('rb')).toMatchObject({
+        fromId: refId('p'),
+        toId: refId('x'),
+        confirmed: false,
+      });
+      expect((await world.itemRow('ib')).payload).toMatchObject({ from_concept_id: refId('p') });
+      expect((await world.itemRow('ib')).status).toBe('abgelehnt');
+      expect((await world.itemRow('i1')).status).toBe('offen');
+    });
+
+    it('Status automatisch sperrt ebenso, weich gelöschte Einträge zählen nicht', async () => {
+      await seed();
+      ok(await accept('i1'));
+      // Eintrag nach dem Umhängen als automatisch angenommen (ohne Bestätigung der Zeile, wie bei duplicate_of)
+      await world.db
+        .update(inboxItem)
+        .set({ status: 'automatisch', decidedAt: new Date() })
+        .where(eq(inboxItem.id, refId('ib')));
+      await expectRelationConflict('i1', 'ib');
+
+      await world.db
+        .update(inboxItem)
+        .set({ deletedAt: new Date() })
+        .where(eq(inboxItem.id, refId('ib')));
+      ok(await reopen('i1'));
+    });
+
+    it('6: die Massenaktion reopen löst beides in einem Aufruf (ib vor i1), Zustand wie vorher', async () => {
+      await seed();
+      await world.relation('r0', { from: 't', to: 'x', kind: 'verwandt', confirmed: true });
+      const before = (await world.snapshot()) as { evidence: { id: string }[]; concepts: object[] };
+      ok(await accept('i1'));
+      ok(await accept('ib', { relation_kind: 'verwandt' }));
+      await expectRelationConflict('i1', 'ib');
+
+      const res = await post('/inbox/bulk', { action: 'reopen', ids: [refId('i1'), refId('ib')] });
+      expect(res.statusCode, res.body).toBe(200);
+      const result = InboxBulkResultSchema.parse(res.json());
+      // it (bei A2 mit abgelehnter Selbstbezug) wird mit i1 wieder offen und steht darum auch in decided
+      expect(result.decided).toEqual([refId('ib'), refId('i1'), refId('it')]);
+      expect(result.skipped).toEqual([]);
+      expect(await world.snapshot()).toEqual({
+        ...before,
+        evidence: before.evidence.filter((row) => row.id !== refId('e2')),
+        concepts: before.concepts.map((row) =>
+          (row as { id: string }).id === refId('t')
+            ? { ...row, examRelevant: true, embedded: false, embeddingModel: null }
+            : row,
+        ),
+      });
     });
   });
 
