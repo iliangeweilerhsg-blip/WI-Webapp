@@ -805,16 +805,46 @@ export interface SessionTickOptions {
 }
 
 /**
+ * Bedarf an Folien nach einem Takt (§17.8): Module als Liste ohne Dubletten, aufsteigend. Ein gültiger Satz ist
+ * gesetzt, nicht gelöscht und gehört zum Modul der Session (wie `usableDeckId`).
+ */
+export interface SessionTickResult {
+  /** Module der Sessions, die dieser Takt von `geplant` auf `bereit` gesetzt hat und die keinen gültigen Satz haben */
+  becameReady: string[];
+  /** Module der nicht gelöschten Sessions in `laeuft` oder `pausiert` ohne gültigen Satz (Stand am Ende des Takts) */
+  activeWithoutDeck: string[];
+}
+
+/** Module der Sessions, auf die `where` passt und die keinen gültigen Satz haben. Nur lesend, ohne Sperre (§17.8) */
+async function modulesWithoutDeck(tx: Tx, where: SQL | undefined): Promise<string[]> {
+  const rows = await tx
+    .selectDistinct({ moduleId: session.moduleId })
+    .from(session)
+    .leftJoin(
+      slideDeck,
+      and(
+        eq(slideDeck.id, session.slideDeckId),
+        eq(slideDeck.moduleId, session.moduleId),
+        notDeleted(slideDeck),
+      ),
+    )
+    .where(and(where, notDeleted(session), isNull(slideDeck.id)));
+  return rows.map((r) => r.moduleId).sort();
+}
+
+/**
  * Ein Takt des Core (jede Minute und beim Start, §9.1): `geplant` → `bereit` → `verpasst` und die
- * Auto-Stopp-Rückfallebene (Regeln 2 und 4). Alles in einer Transaktion.
+ * Auto-Stopp-Rückfallebene (Regeln 2 und 4). Alles in einer Transaktion. Das Ergebnis meldet den Bedarf an
+ * Folien (§17.8), nur lesend und ohne neue Sperre.
  */
 export async function runSessionTick(
   db: Db,
   config: Pick<Config, 'dataDir'>,
   now: Date,
   options: SessionTickOptions = {},
-): Promise<void> {
-  await db.transaction(async (tx) => {
+): Promise<SessionTickResult> {
+  return db.transaction(async (tx): Promise<SessionTickResult> => {
+    const readyIds: string[] = [];
     await lockSessionTransitions(tx);
 
     // 1. Nie gestartete Sessions mit Termin
@@ -832,8 +862,11 @@ export async function runSessionTick(
       if (next !== p.row.state) {
         await tx.update(session).set({ state: next, updatedAt: bumpedAt() }).where(eq(session.id, p.row.id));
         await emitUpdated(tx, p.row.id);
+        if (next === 'bereit') readyIds.push(p.row.id);
       }
     }
+    const becameReady =
+      readyIds.length > 0 ? await modulesWithoutDeck(tx, inArray(session.id, readyIds)) : [];
 
     // 2. Auto-Stopp-Rückfallebene
     const active = await tx
@@ -843,7 +876,7 @@ export async function runSessionTick(
       .where(and(inArray(session.state, [...ACTIVE_STATES]), notDeleted(session)))
       .orderBy(asc(session.id))
       .for('no key update', { of: session });
-    if (active.length === 0) return;
+    if (active.length === 0) return { becameReady, activeWithoutDeck: [] };
     const { lecture } = await getSettings(tx, config);
     for (const a of active) {
       if (!a.row.startedAt) continue;
@@ -876,6 +909,9 @@ export async function runSessionTick(
         });
       }
     }
+    // Nach der Rückfallebene: Eine in diesem Takt beendete Session zählt nicht mehr
+    const activeWithoutDeck = await modulesWithoutDeck(tx, inArray(session.state, [...ACTIVE_STATES]));
+    return { becameReady, activeWithoutDeck };
   });
 }
 
@@ -891,6 +927,11 @@ export interface SessionTickerOptions {
   onError: (error: unknown) => void;
   intervalMs?: number;
   now?: () => Date;
+  /**
+   * Nach jedem gelungenen Takt, also nach dem Commit (§17.8). Synchron, wartet auf nichts. Wirft er, geht der Fehler
+   * an `onError`. Nach einem gescheiterten Takt läuft er nicht.
+   */
+  afterTick?: (result: SessionTickResult, options: SessionTickOptions) => void;
 }
 
 /** Startet den Core-Takt: sofort einmal mit `startup`, danach jede Minute. Fehler brechen den Takt nicht ab */
@@ -899,7 +940,10 @@ export function startSessionTicker(options: SessionTickerOptions): SessionTicker
   let running: Promise<void> = Promise.resolve();
   const runOnce = (tickOptions: SessionTickOptions = {}): Promise<void> => {
     running = running
-      .then(() => runSessionTick(options.db, options.config, now(), tickOptions))
+      .then(async () => {
+        const result = await runSessionTick(options.db, options.config, now(), tickOptions);
+        options.afterTick?.(result, tickOptions);
+      })
       .catch(options.onError);
     return running;
   };
