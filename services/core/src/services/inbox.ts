@@ -30,6 +30,7 @@ import type {
 import type { Db, DbOrTx, Tx } from '../db/client.ts';
 import { concept, conceptRelation, inboxItem, notDeleted, session } from '../db/schema/index.ts';
 import { HttpError } from '../errors.ts';
+import { isValidTimestamp } from '../lib/pagination.ts';
 import {
   acceptMerge,
   acceptNew,
@@ -155,7 +156,6 @@ export interface ListInboxOptions {
   limit: number;
 }
 
-const TS_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{1,6})?[+-]\d{2}(:\d{2})?$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 interface InboxCursor {
@@ -171,7 +171,7 @@ function decodeInboxCursor(raw: string): InboxCursor {
       const [ts, priority, id] = parsed as unknown[];
       if (
         typeof ts === 'string' &&
-        TS_RE.test(ts) &&
+        isValidTimestamp(ts) &&
         typeof priority === 'number' &&
         Number.isSafeInteger(priority) &&
         typeof id === 'string' &&

@@ -6709,7 +6709,7 @@ class DeckOptions(BaseModel):
     )
     suggested_deck_id: Uuid | None = Field(
         ...,
-        description='Erster freier Satz in der Reihenfolge von items, sonst null. Null, wenn die Session schon einen Satz hat oder abgeschlossen ist',
+        description='Erster freier Satz in der Reihenfolge von items, sonst null. Auch ohne session_id (spontaner Start). Null, wenn die Session schon einen Satz dieses Moduls hat oder abgeschlossen ist',
     )
     lock: DeckLock | None
     items: list[DeckOption] = Field(

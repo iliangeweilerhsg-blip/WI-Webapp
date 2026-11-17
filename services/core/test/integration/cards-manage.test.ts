@@ -279,6 +279,36 @@ describe('GET /cards: Filter', () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it('Zeit-Cursor mit ungültigem Datum: 400 invalid_cursor statt 500 (#357)', async () => {
+    await seed();
+    const enc = (ts: string, sort: string) =>
+      Buffer.from(JSON.stringify([sort === 'neu' ? 'n' : 'f', ts, refId('a1')]), 'utf8').toString(
+        'base64url',
+      );
+    for (const sort of ['neu', 'faellig']) {
+      for (const ts of [
+        '2026-02-30 10:00:00+00',
+        '2026-13-01 10:00:00+00',
+        '2026-11-04 99:00:00+00',
+        '0000-01-01 00:00:00+00',
+        '2026-11-04 10:00:00+99',
+      ]) {
+        const res = await call('GET', `/cards?sort=${sort}&cursor=${enc(ts, sort)}`);
+        expect(res.statusCode, `${sort} ${ts}`).toBe(400);
+        expect(errorOf(res).code, `${sort} ${ts}`).toBe('invalid_cursor');
+      }
+      // gültige Grenzfälle (Schaltjahr, Mikrosekunden, Offsets) erreichen die Datenbank ohne Fehler
+      for (const ts of [
+        '2028-02-29 23:59:59.999999+05:30',
+        '2026-11-04 10:00:00-03:00',
+        '2026-11-04 10:00:00+00',
+      ]) {
+        const res = await call('GET', `/cards?sort=${sort}&cursor=${enc(ts, sort)}`);
+        expect(res.statusCode, `${sort} ${ts}: ${res.body}`).toBe(200);
+      }
+    }
+  });
+
   it('präparierter schwer-Cursor außerhalb des Wertebereichs: 400 statt 500 (N1)', async () => {
     await seed();
     const enc = (parts: string[]) => Buffer.from(JSON.stringify(parts), 'utf8').toString('base64url');

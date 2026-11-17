@@ -2123,7 +2123,7 @@ session_id: (Uuid | null)
  */
 current_deck_id: (Uuid | null)
 /**
- * Erster freier Satz in der Reihenfolge von items, sonst null. Null, wenn die Session schon einen Satz hat oder abgeschlossen ist
+ * Erster freier Satz in der Reihenfolge von items, sonst null. Auch ohne session_id (spontaner Start). Null, wenn die Session schon einen Satz dieses Moduls hat oder abgeschlossen ist
  */
 suggested_deck_id: (Uuid | null)
 lock: (DeckLock | null)
