@@ -191,6 +191,19 @@ describe('GET /inbox', () => {
     expect(errorOf(res)?.code).toBe('invalid_cursor');
   });
 
+  it('Cursor mit ungültigem Datum ergibt 400 invalid_cursor, gültiger Cursor 200', async () => {
+    await seed();
+    const enc = (ts: string) =>
+      Buffer.from(JSON.stringify([ts, 0, refId('i1')]), 'utf8').toString('base64url');
+    for (const ts of ['2026-02-30 10:00:00+00', '2026-13-01 10:00:00+00', '2026-01-01 25:00:00+00']) {
+      const res = await get(`/inbox?cursor=${enc(ts)}`);
+      expect(res.statusCode, ts).toBe(400);
+      expect(errorOf(res)?.code).toBe('invalid_cursor');
+    }
+    const ok = await get(`/inbox?cursor=${enc('2026-02-28 10:00:00.123456+00')}`);
+    expect(ok.statusCode).toBe(200);
+  });
+
   it('gelöschte Einträge und Einträge gelöschter Sessions gibt es nicht', async () => {
     await seed();
     await app.handle.sql`UPDATE inbox_item SET deleted_at = now() WHERE id = ${refId('i1')}`;

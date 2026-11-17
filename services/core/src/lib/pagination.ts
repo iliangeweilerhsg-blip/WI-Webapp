@@ -34,7 +34,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * Uhrzeit 00:00:00..23:59:59 und Offset bis ±15:59 (Postgres-Grenze). Bleibt als Text erhalten,
  * damit Mikrosekunden verlustfrei bleiben.
  */
-function isValidTimestamp(ts: string): boolean {
+export function isValidTimestamp(ts: string): boolean {
   const m = TS_RE.exec(ts);
   if (!m) return false;
   const [year, month, day, hour, minute, second, offHour, offMinute] = [
