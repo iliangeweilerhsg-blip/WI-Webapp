@@ -1097,6 +1097,8 @@ T1-DB legt alle an: `appendOp`, `softDelete`/`restoreFromTrash` und `getSettings
 
 **Sperrreihenfolge** (gilt für Stopp, Sync-Handler und REST gleich, sonst droht ein Deadlock): `lockSessionTransitions` → Session-Zeile (`FOR NO KEY UPDATE` bzw. `FOR SHARE`) → `sync_stream` → `lockRecording` (nach ID sortiert) → Job-Zeilen. Die Aufnahme-Routen sperren die Session **nie nach** `lockRecording`: Das Anlegen liest sie mit `FOR SHARE` davor; der Chunk-Upload liest sie ohne Sperre erst nach `lockRecording` (unter Read Committed sieht er dann entweder den committeten Stopp oder der Stopp zählt den Chunk mit).
 
+**Session-Zeile nach dem Strom:** Wer den Strom `session:<id>` schon hält (Op-Handler nach `appendOp`, Restore nach `lockStreams`) und danach die Session-Zeile braucht, sperrt sie höchstens `FOR KEY SHARE`. Ein stärkeres `FOR SHARE` kollidiert mit `FOR NO KEY UPDATE` von `transitionSession`, `runSessionTick` und `updateSession`, die danach den Strom wollen (40P01). `FOR KEY SHARE` wartet weiter auf `FOR UPDATE` (Löschen der Session). Das gilt für `photo.add` (`upsertPhotoMeta`: Foto übernimmt `deleted_at` der Session) und für den Restore von Marker und Foto (§13). `marker.add` und `slide.change` lesen die Session ohne Sperre (`parentSession`). Sperren vor dem Strom (Aufnahme anlegen, Inbox, Notizbuch-Handler am Modul/Notizbuch) dürfen `FOR SHARE` bleiben.
+
 ### 16.3 Tickets und Besitz
 
 | Ticket | Inhalt | Besitzt (Dateien) | Abhängig von |
