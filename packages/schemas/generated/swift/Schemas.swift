@@ -100,6 +100,7 @@ struct SchemaBundle: Codable {
     let deckOption: DeckOption?
     let deckOptions: DeckOptions?
     let deckSource: DeckSource?
+    let deckUse: DeckUse?
     let device: Device?
     let deviceKind: DeviceKind?
     let deviceList: DeviceList?
@@ -548,6 +549,7 @@ struct SchemaBundle: Codable {
         case deckOption = "DeckOption"
         case deckOptions = "DeckOptions"
         case deckSource = "DeckSource"
+        case deckUse = "DeckUse"
         case device = "Device"
         case deviceKind = "DeviceKind"
         case deviceList = "DeviceList"
@@ -1016,6 +1018,7 @@ extension SchemaBundle {
         deckOption: DeckOption?? = nil,
         deckOptions: DeckOptions?? = nil,
         deckSource: DeckSource?? = nil,
+        deckUse: DeckUse?? = nil,
         device: Device?? = nil,
         deviceKind: DeviceKind?? = nil,
         deviceList: DeviceList?? = nil,
@@ -1464,6 +1467,7 @@ extension SchemaBundle {
             deckOption: deckOption ?? self.deckOption,
             deckOptions: deckOptions ?? self.deckOptions,
             deckSource: deckSource ?? self.deckSource,
+            deckUse: deckUse ?? self.deckUse,
             device: device ?? self.device,
             deviceKind: deviceKind ?? self.deviceKind,
             deviceList: deviceList ?? self.deviceList,
@@ -6566,8 +6570,7 @@ enum DeckLock: String, Codable {
     case folienwechsel = "folienwechsel"
 }
 
-/// Ein wählbarer Foliensatz mit Verfügbarkeit (§22.3). used_by: SessionRef aus
-/// concepts.schema.json (gemeinsamer Namensraum aller Schema-Dateien)
+/// Ein wählbarer Foliensatz mit Verfügbarkeit (§22.3)
 // MARK: - DeckOption
 struct DeckOption: Codable {
     /// Größtes moodle_item.timemodified der Moodle-Dateien des Satzes, sonst
@@ -6578,8 +6581,10 @@ struct DeckOption: Codable {
     /// verarbeitet trägt den Satz
     let free: Bool
     let source: DeckSource
-    /// Andere Sessions, die den Satz tragen, neueste zuerst, höchstens 3 (nur zur Anzeige)
-    let usedBy: [SessionRef]
+    /// Andere Sessions, die den Satz tragen und ihn belegen (wie free), nach
+    /// coalesce(started_at, created_at) absteigend, dann id, höchstens 3 (nur zur Anzeige, keine
+    /// Gesamtzahl)
+    let usedBy: [DeckUse]
 
     enum CodingKeys: String, CodingKey {
         case availableAt = "available_at"
@@ -6613,7 +6618,7 @@ extension DeckOption {
         deck: SlideDeck? = nil,
         free: Bool? = nil,
         source: DeckSource? = nil,
-        usedBy: [SessionRef]? = nil
+        usedBy: [DeckUse]? = nil
     ) -> DeckOption {
         return DeckOption(
             availableAt: availableAt ?? self.availableAt,
@@ -6735,14 +6740,70 @@ enum DeckSource: String, Codable {
     case upload = "upload"
 }
 
+/// Kurzangabe einer Session, die einen Foliensatz belegt ("schon in VL 6", §22.3)
+// MARK: - DeckUse
+struct DeckUse: Codable {
+    /// VL-Nummer (Session.number)
+    let number: Int?
+    let sessionID: String
+    let title: String?
+
+    enum CodingKeys: String, CodingKey {
+        case number = "number"
+        case sessionID = "session_id"
+        case title = "title"
+    }
+}
+
+// MARK: DeckUse convenience initializers and mutators
+
+extension DeckUse {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(DeckUse.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        number: Int?? = nil,
+        sessionID: String? = nil,
+        title: String?? = nil
+    ) -> DeckUse {
+        return DeckUse(
+            number: number ?? self.number,
+            sessionID: sessionID ?? self.sessionID,
+            title: title ?? self.title
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 /// GET /modules/{id}/deck-options?session_id (§22.3). Momentaufnahme, verbindlich prüft erst
 /// PATCH /sessions/{id}
 // MARK: - DeckOptions
 struct DeckOptions: Codable {
-    /// Nicht gelöschter Satz der Session, sonst null (auch ohne session_id)
+    /// Nicht gelöschter Satz der Session, sonst null (auch ohne session_id und bei gelöschtem
+    /// Satz)
     let currentDeckID: String?
     /// Wählbare Sätze, available_at absteigend, dann id absteigend, höchstens 50. Der aktuelle
-    /// Satz ist immer dabei, auch jenseits der 50 (dann 51 Einträge)
+    /// Satz ist immer dabei (auch bei fehler und jenseits der 50), ebenso der Vorschlag (dann
+    /// bis zu 51 Einträge)
     let items: [DeckOption]
     let lock: DeckLock?
     let moduleID: String
@@ -27222,6 +27283,15 @@ extension SlideDeck {
         try container.encode(updatedAt, forKey: .updatedAt)
         try container.encode(uploadedAt, forKey: .uploadedAt)
         try container.encode(userID, forKey: .userID)
+    }
+}
+
+extension DeckUse {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(number, forKey: .number)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(title, forKey: .title)
     }
 }
 

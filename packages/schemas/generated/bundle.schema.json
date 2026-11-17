@@ -278,6 +278,9 @@
     "DeckSource": {
       "$ref": "#/$defs/DeckSource"
     },
+    "DeckUse": {
+      "$ref": "#/$defs/DeckUse"
+    },
     "Device": {
       "$ref": "#/$defs/Device"
     },
@@ -4034,7 +4037,7 @@
     "DeckOption": {
       "title": "DeckOption",
       "type": "object",
-      "description": "Ein wählbarer Foliensatz mit Verfügbarkeit (§22.3). used_by: SessionRef aus concepts.schema.json (gemeinsamer Namensraum aller Schema-Dateien)",
+      "description": "Ein wählbarer Foliensatz mit Verfügbarkeit (§22.3)",
       "required": [
         "deck",
         "available_at",
@@ -4061,9 +4064,9 @@
         "used_by": {
           "type": "array",
           "maxItems": 3,
-          "description": "Andere Sessions, die den Satz tragen, neueste zuerst, höchstens 3 (nur zur Anzeige)",
+          "description": "Andere Sessions, die den Satz tragen und ihn belegen (wie free), nach coalesce(started_at, created_at) absteigend, dann id, höchstens 3 (nur zur Anzeige, keine Gesamtzahl)",
           "items": {
-            "$ref": "#/$defs/SessionRef"
+            "$ref": "#/$defs/DeckUse"
           }
         }
       }
@@ -4104,7 +4107,7 @@
               "type": "null"
             }
           ],
-          "description": "Nicht gelöschter Satz der Session, sonst null (auch ohne session_id)"
+          "description": "Nicht gelöschter Satz der Session, sonst null (auch ohne session_id und bei gelöschtem Satz)"
         },
         "suggested_deck_id": {
           "anyOf": [
@@ -4130,7 +4133,7 @@
         "items": {
           "type": "array",
           "maxItems": 51,
-          "description": "Wählbare Sätze, available_at absteigend, dann id absteigend, höchstens 50. Der aktuelle Satz ist immer dabei, auch jenseits der 50 (dann 51 Einträge)",
+          "description": "Wählbare Sätze, available_at absteigend, dann id absteigend, höchstens 50. Der aktuelle Satz ist immer dabei (auch bei fehler und jenseits der 50), ebenso der Vorschlag (dann bis zu 51 Einträge)",
           "items": {
             "$ref": "#/$defs/DeckOption"
           }
@@ -4145,6 +4148,36 @@
         "upload"
       ],
       "description": "Herkunft eines wählbaren Foliensatzes (VERTRAEGE §22.3): moodle = mindestens eine Moodle-Datei zeigt auf den Satz"
+    },
+    "DeckUse": {
+      "title": "DeckUse",
+      "type": "object",
+      "description": "Kurzangabe einer Session, die einen Foliensatz belegt (\"schon in VL 6\", §22.3)",
+      "required": [
+        "session_id",
+        "number",
+        "title"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "number": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "description": "VL-Nummer (Session.number)"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
     },
     "Device": {
       "title": "Device",

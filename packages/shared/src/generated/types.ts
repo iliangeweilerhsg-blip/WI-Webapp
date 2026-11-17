@@ -2054,7 +2054,7 @@ backup_encryption?: boolean
 backup_time?: string
 }
 /**
- * Ein wählbarer Foliensatz mit Verfügbarkeit (§22.3). used_by: SessionRef aus concepts.schema.json (gemeinsamer Namensraum aller Schema-Dateien)
+ * Ein wählbarer Foliensatz mit Verfügbarkeit (§22.3)
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "DeckOption".
@@ -2068,11 +2068,11 @@ source: DeckSource
  */
 free: boolean
 /**
- * Andere Sessions, die den Satz tragen, neueste zuerst, höchstens 3 (nur zur Anzeige)
+ * Andere Sessions, die den Satz tragen und ihn belegen (wie free), nach coalesce(started_at, created_at) absteigend, dann id, höchstens 3 (nur zur Anzeige, keine Gesamtzahl)
  * 
  * @maxItems 3
  */
-used_by: SessionRef[]
+used_by: DeckUse[]
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -2096,6 +2096,20 @@ uploaded_at: Timestamp
 ingest_state: IngestState
 }
 /**
+ * Kurzangabe einer Session, die einen Foliensatz belegt ("schon in VL 6", §22.3)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "DeckUse".
+ */
+export interface DeckUse {
+session_id: Uuid
+/**
+ * VL-Nummer (Session.number)
+ */
+number: (number | null)
+title: (string | null)
+}
+/**
  * GET /modules/{id}/deck-options?session_id (§22.3). Momentaufnahme, verbindlich prüft erst PATCH /sessions/{id}
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -2105,7 +2119,7 @@ export interface DeckOptions {
 module_id: Uuid
 session_id: (Uuid | null)
 /**
- * Nicht gelöschter Satz der Session, sonst null (auch ohne session_id)
+ * Nicht gelöschter Satz der Session, sonst null (auch ohne session_id und bei gelöschtem Satz)
  */
 current_deck_id: (Uuid | null)
 /**
@@ -2114,7 +2128,7 @@ current_deck_id: (Uuid | null)
 suggested_deck_id: (Uuid | null)
 lock: (DeckLock | null)
 /**
- * Wählbare Sätze, available_at absteigend, dann id absteigend, höchstens 50. Der aktuelle Satz ist immer dabei, auch jenseits der 50 (dann 51 Einträge)
+ * Wählbare Sätze, available_at absteigend, dann id absteigend, höchstens 50. Der aktuelle Satz ist immer dabei (auch bei fehler und jenseits der 50), ebenso der Vorschlag (dann bis zu 51 Einträge)
  * 
  * @maxItems 51
  */

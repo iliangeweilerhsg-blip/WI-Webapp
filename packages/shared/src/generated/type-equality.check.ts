@@ -97,6 +97,7 @@ const _DeckLock: Equal<z.infer<typeof Z.DeckLockSchema>, T.DeckLock> = true;
 const _DeckOption: Equal<z.infer<typeof Z.DeckOptionSchema>, T.DeckOption> = true;
 const _DeckOptions: Equal<z.infer<typeof Z.DeckOptionsSchema>, T.DeckOptions> = true;
 const _DeckSource: Equal<z.infer<typeof Z.DeckSourceSchema>, T.DeckSource> = true;
+const _DeckUse: Equal<z.infer<typeof Z.DeckUseSchema>, T.DeckUse> = true;
 const _Device: Equal<z.infer<typeof Z.DeviceSchema>, T.Device> = true;
 const _DeviceKind: Equal<z.infer<typeof Z.DeviceKindSchema>, T.DeviceKind> = true;
 const _DeviceList: Equal<z.infer<typeof Z.DeviceListSchema>, T.DeviceList> = true;

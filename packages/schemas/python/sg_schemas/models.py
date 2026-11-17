@@ -2691,6 +2691,26 @@ class ConceptsResolveResult(BaseModel):
     )
 
 
+class DeckUse(BaseModel):
+    """
+    Kurzangabe einer Session, die einen Foliensatz belegt ("schon in VL 6", §22.3)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    number: StrictInt | None = Field(
+        ..., description='VL-Nummer (Session.number)', ge=1
+    )
+    title: StrictStr | None
+
+
 class Device(BaseModel):
     """
     Gekoppeltes Gerät. Das Token selbst gibt die API nie aus (gespeichert nur token_hash).
@@ -6644,7 +6664,7 @@ class CostSummary(BaseModel):
 
 class DeckOption(BaseModel):
     """
-    Ein wählbarer Foliensatz mit Verfügbarkeit (§22.3). used_by: SessionRef aus concepts.schema.json (gemeinsamer Namensraum aller Schema-Dateien)
+    Ein wählbarer Foliensatz mit Verfügbarkeit (§22.3)
     """
 
     model_config = ConfigDict(
@@ -6661,9 +6681,9 @@ class DeckOption(BaseModel):
         ...,
         description='Keine andere nicht gelöschte Session in geplant, bereit, laeuft, pausiert, beendet oder verarbeitet trägt den Satz',
     )
-    used_by: list[SessionRef] = Field(
+    used_by: list[DeckUse] = Field(
         ...,
-        description='Andere Sessions, die den Satz tragen, neueste zuerst, höchstens 3 (nur zur Anzeige)',
+        description='Andere Sessions, die den Satz tragen und ihn belegen (wie free), nach coalesce(started_at, created_at) absteigend, dann id, höchstens 3 (nur zur Anzeige, keine Gesamtzahl)',
         max_length=3,
     )
 
@@ -6685,7 +6705,7 @@ class DeckOptions(BaseModel):
     session_id: Uuid | None
     current_deck_id: Uuid | None = Field(
         ...,
-        description='Nicht gelöschter Satz der Session, sonst null (auch ohne session_id)',
+        description='Nicht gelöschter Satz der Session, sonst null (auch ohne session_id und bei gelöschtem Satz)',
     )
     suggested_deck_id: Uuid | None = Field(
         ...,
@@ -6694,7 +6714,7 @@ class DeckOptions(BaseModel):
     lock: DeckLock | None
     items: list[DeckOption] = Field(
         ...,
-        description='Wählbare Sätze, available_at absteigend, dann id absteigend, höchstens 50. Der aktuelle Satz ist immer dabei, auch jenseits der 50 (dann 51 Einträge)',
+        description='Wählbare Sätze, available_at absteigend, dann id absteigend, höchstens 50. Der aktuelle Satz ist immer dabei (auch bei fehler und jenseits der 50), ebenso der Vorschlag (dann bis zu 51 Einträge)',
         max_length=51,
     )
 
@@ -8508,6 +8528,7 @@ class SchemaBundle(BaseModel):
     DeckOption_1: DeckOption | None = Field(None, alias='DeckOption')
     DeckOptions_1: DeckOptions | None = Field(None, alias='DeckOptions')
     DeckSource_1: DeckSource | None = Field(None, alias='DeckSource')
+    DeckUse_1: DeckUse | None = Field(None, alias='DeckUse')
     Device_1: Device | None = Field(None, alias='Device')
     DeviceKind_1: DeviceKind | None = Field(None, alias='DeviceKind')
     DeviceList_1: DeviceList | None = Field(None, alias='DeviceList')

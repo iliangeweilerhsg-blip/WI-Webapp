@@ -45,15 +45,9 @@
       "free": false,
       "used_by": [
         {
-          "id": "0190f6a2-7b3c-7d4e-8f00-000000000201",
+          "session_id": "0190f6a2-7b3c-7d4e-8f00-000000000201",
           "number": 6,
-          "title": "Normalisierung",
-          "started_at": "2026-11-03T10:15:00Z",
-          "module": {
-            "id": "0190f6a2-7b3c-7d4e-8f00-000000000002",
-            "name": "Datenbanken",
-            "short_name": "DB"
-          }
+          "title": "Normalisierung"
         }
       ]
     }
