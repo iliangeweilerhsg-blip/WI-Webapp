@@ -13,6 +13,10 @@ protocol PairedMacStore {
     func loadPairedMac() -> PairedMac?
     func savePairedMac(_ mac: PairedMac)
     func clearPairedMac()
+    /// Hat der Core beim letzten `welcome` `stroke_sizes` gemeldet (VERTRAEGE §23.4, §23.7)? Vor dem ersten `welcome`
+    /// und nach `clearPairedMac()` ist es `false`.
+    var strokeSizes: Bool { get }
+    func setStrokeSizes(_ supported: Bool)
 }
 
 /// Ablage in UserDefaults. Hier steht nur, was kein Geheimnis ist.
@@ -21,6 +25,7 @@ struct DefaultsPairedMacStore: PairedMacStore {
     private static let portKey = "pairedMac.port"
     private static let deviceIDKey = "pairedMac.deviceID"
     private static let deviceNameKey = "pairedMac.deviceName"
+    private static let strokeSizesKey = "pairedMac.strokeSizes"
 
     func loadPairedMac() -> PairedMac? {
         let defaults = UserDefaults.standard
@@ -43,8 +48,16 @@ struct DefaultsPairedMacStore: PairedMacStore {
 
     func clearPairedMac() {
         let defaults = UserDefaults.standard
-        for key in [Self.hostKey, Self.portKey, Self.deviceIDKey, Self.deviceNameKey] {
+        for key in [Self.hostKey, Self.portKey, Self.deviceIDKey, Self.deviceNameKey, Self.strokeSizesKey] {
             defaults.removeObject(forKey: key)
         }
+    }
+
+    var strokeSizes: Bool {
+        UserDefaults.standard.bool(forKey: Self.strokeSizesKey)
+    }
+
+    func setStrokeSizes(_ supported: Bool) {
+        UserDefaults.standard.set(supported, forKey: Self.strokeSizesKey)
     }
 }

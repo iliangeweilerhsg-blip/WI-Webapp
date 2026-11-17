@@ -56,10 +56,12 @@ extension AppModel {
         // Unit-Tests laufen in der App: keine Dateien und keine Verbindung
         var sync: SyncEngine?
         var library: InkLibraryService?
+        let macStore = DefaultsPairedMacStore()
         if !AppEnvironment.isRunningTests {
             let store = FileInkLibraryStore.standard()
             let engine = SyncEngine.live(
-                client: client, tokenStore: tokenStore, appVersion: appVersion, library: store)
+                client: client, tokenStore: tokenStore, appVersion: appVersion, library: store,
+                capabilities: macStore)
             sync = engine
             let service = InkLibraryService(
                 store: store, sync: engine, client: client, pageStore: FileInkPageStore.standard())
@@ -70,7 +72,7 @@ extension AppModel {
         return AppModel(
             client: client,
             tokenStore: tokenStore,
-            macStore: DefaultsPairedMacStore(),
+            macStore: macStore,
             deviceName: UIDevice.current.name,
             appVersion: appVersion,
             sync: sync,

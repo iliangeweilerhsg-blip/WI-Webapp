@@ -10,6 +10,10 @@ struct InkPointSample: Equatable, Sendable {
     var force: Double
     var azimuth: Double
     var altitude: Double
+    /// `PKStrokePoint.size.width` in pt (VERTRAEGE §23.7). 0, wenn die Erfassung keine Größe liefert.
+    var width: Double = 0
+    /// `PKStrokePoint.size.height` in pt
+    var height: Double = 0
 }
 
 /// Ein Strich, wie ihn die Erfassung liefert. Unabhängig von PencilKit, damit das Umrechnen
@@ -40,14 +44,25 @@ struct InkPackedPoint: Equatable, Sendable {
     var altitude: Float
 }
 
+/// Breite und Höhe eines Punkts in pt (VERTRAEGE §23.2): zwei `Float32`
+struct InkPackedSize: Equatable, Sendable {
+    var width: Float
+    var height: Float
+}
+
 struct InkCodecOptions: Equatable, Sendable {
     /// Teiler, der den Rohdruck auf 0–1 bringt. Der Apple Pencil meldet über `UITouch` höchstens
     /// 25/6 ≈ 4,17. Ob PencilKit denselben Bereich nutzt, ist am Gerät zu messen (Spike S3-U1).
     var forceDivisor: Double = 25.0 / 6.0
     /// Deckkraft des Textmarkers im Schema, wenn die Farbe deckend ankommt (Testdaten: `#FFE06666`)
     var markerAlpha: UInt8 = 0x66
-    /// Der Core nimmt je Strich höchstens 750 000 Byte an (VERTRAEGE §11.3)
-    var maxPoints: Int = InkStrokeCodec.maxPointsPerStroke
+    /// Mehr Punkte sendet das iPad nicht: Ausdünnen ab hier (#382, VERTRAEGE §23.3). Das Format erlaubt mehr
+    /// (`maxPointsPerStroke`), aber 31 250 Punkte ergeben allein 1 000 000 Zeichen Base64 und damit eine Nachricht
+    /// über `SyncEngine.maxMessageBytes`.
+    var maxPoints: Int = InkStrokeCodec.maxPointsSent
+    /// Breite je Punkt als `sizes` mitsenden (Format v2, VERTRAEGE §23.7). Nur wahr, wenn der Core `stroke_sizes`
+    /// meldet (`SyncEngine.strokeSizesSupported`). Vorgabe: aus, dann entsteht ein Strich im Format v1.
+    var includeSizes: Bool = false
 
     static let standard = InkCodecOptions()
 }
@@ -62,7 +77,14 @@ enum InkCodecError: Error, Equatable {
 enum InkStrokeCodec {
     static let floatsPerPoint = 6
     static let bytesPerPoint = 24
+    static let bytesPerSize = 8
+    /// Grenze des Formats: Der Core nimmt je Strich höchstens 750 000 Byte an (VERTRAEGE §11.3, §23.3)
     static let maxPointsPerStroke = 750_000 / 24
+    /// Grenze beim Senden (#382, VERTRAEGE §23.3): 29 000 Punkte sind 928 000 Zeichen Base64, mit Umschlag unter
+    /// 950 000 Byte, auch nach der Zeitkorrektur. Längere Striche werden gleichmäßig ausgedünnt.
+    static let maxPointsSent = 29_000
+    /// `sizes` nur bis zu dieser Punktzahl (VERTRAEGE §23.3, Regel 1): 20 000 Punkte sind 853 336 Zeichen Base64
+    static let maxPointsWithSizes = 20_000
 
     static let identityTransform: [Double] = [1, 0, 0, 1, 0, 0]
 
@@ -114,6 +136,74 @@ enum InkStrokeCodec {
             offset += bytesPerPoint
         }
         return points
+    }
+
+    // MARK: Größen packen
+
+    /// Base64 von n × 2 `Float32` little-endian (`width`, `height`). 8 Byte je Punkt ergeben Padding, wenn die
+    /// Punktzahl kein Vielfaches von 3 ist (VERTRAEGE §23.2).
+    static func packSizes(_ sizes: [InkPackedSize]) -> String {
+        var data = Data(capacity: sizes.count * bytesPerSize)
+        for size in sizes {
+            for value in [size.width, size.height] {
+                let bits = value.bitPattern
+                data.append(UInt8(truncatingIfNeeded: bits))
+                data.append(UInt8(truncatingIfNeeded: bits >> 8))
+                data.append(UInt8(truncatingIfNeeded: bits >> 16))
+                data.append(UInt8(truncatingIfNeeded: bits >> 24))
+            }
+        }
+        return data.base64EncodedString()
+    }
+
+    static func unpackSizes(_ base64: String) throws -> [InkPackedSize] {
+        guard let data = Data(base64Encoded: base64) else { throw InkCodecError.notBase64 }
+        let bytes = [UInt8](data)
+        guard !bytes.isEmpty, bytes.count % bytesPerSize == 0 else {
+            throw InkCodecError.badLength(bytes.count)
+        }
+        func float(at offset: Int) -> Float {
+            let bits =
+                UInt32(bytes[offset])
+                | UInt32(bytes[offset + 1]) << 8
+                | UInt32(bytes[offset + 2]) << 16
+                | UInt32(bytes[offset + 3]) << 24
+            return Float(bitPattern: bits)
+        }
+        var sizes: [InkPackedSize] = []
+        sizes.reserveCapacity(bytes.count / bytesPerSize)
+        var offset = 0
+        while offset < bytes.count {
+            sizes.append(InkPackedSize(width: float(at: offset), height: float(at: offset + 4)))
+            offset += bytesPerSize
+        }
+        return sizes
+    }
+
+    /// Die Größen des Strichs als Text für `Stroke.sizes`, oder `nil` (dann entsteht ein Strich im Format v1).
+    /// `nil` bei: `includeSizes = false`, mehr als `maxPointsWithSizes` Punkten, ausgedünntem Strich (Einträge und
+    /// Punkte passten sonst nicht zusammen), nicht endlichen oder negativen Werten (auch als `Float`) und lauter Nullen.
+    static func encodeSizes(
+        _ samples: [InkPointSample], packedCount: Int, options: InkCodecOptions
+    ) -> String? {
+        guard options.includeSizes,
+            !samples.isEmpty,
+            samples.count <= maxPointsWithSizes,
+            samples.count == packedCount
+        else { return nil }
+        var sizes: [InkPackedSize] = []
+        sizes.reserveCapacity(samples.count)
+        var anyPositive = false
+        for sample in samples {
+            let width = Float(sample.width)
+            let height = Float(sample.height)
+            guard width.isFinite, height.isFinite, width >= 0, height >= 0 else { return nil }
+            if width > 0 || height > 0 { anyPositive = true }
+            // -0 wird zu +0: Der Core prüft „nicht negativ“
+            sizes.append(InkPackedSize(width: width == 0 ? 0 : width, height: height == 0 ? 0 : height))
+        }
+        guard anyPositive else { return nil }
+        return packSizes(sizes)
     }
 
     // MARK: Erfassung → Schema
@@ -191,7 +281,7 @@ enum InkStrokeCodec {
             createdAt: createdAt,
             layer: sample.layer,
             points: packPoints(points),
-            sizes: nil,
+            sizes: encodeSizes(sample.points, packedCount: points.count, options: options),
             tEndMS: end,
             tStartMS: start,
             tool: sample.tool,

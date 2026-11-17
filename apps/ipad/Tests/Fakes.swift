@@ -24,6 +24,7 @@ final class FakeTokenStore: TokenStore {
 
 final class FakePairedMacStore: PairedMacStore {
     var mac: PairedMac?
+    var strokeSizes = false
 
     init(mac: PairedMac? = nil) {
         self.mac = mac
@@ -31,7 +32,11 @@ final class FakePairedMacStore: PairedMacStore {
 
     func loadPairedMac() -> PairedMac? { mac }
     func savePairedMac(_ mac: PairedMac) { self.mac = mac }
-    func clearPairedMac() { mac = nil }
+    func clearPairedMac() {
+        mac = nil
+        strokeSizes = false
+    }
+    func setStrokeSizes(_ supported: Bool) { strokeSizes = supported }
 }
 
 /// Schnittstellen des iPads aus einer festen Liste statt aus `getifaddrs`

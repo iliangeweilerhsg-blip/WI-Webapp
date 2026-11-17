@@ -20,7 +20,14 @@ enum SGSync {
     nonisolated(unsafe) static var log: (String) -> Void = { _ in }
 
     static func decoder() -> JSONDecoder { newJSONDecoder() }
-    static func encoder() -> JSONEncoder { newJSONEncoder() }
+    /// Wie `newJSONEncoder()`, aber `/` bleibt unmaskiert (#382, VERTRAEGE §23.3). JSON erlaubt beides, der Core liest
+    /// beides gleich. Ohne diese Option schriebe Swift jedes `/` im Base64 der Punkte als `\/`, und eine Nachricht mit
+    /// vielen langen Strichen würde um mehrere Prozent länger. REST (`CoreClient`) nutzt weiter `newJSONEncoder()`.
+    static func encoder() -> JSONEncoder {
+        let encoder = newJSONEncoder()
+        encoder.outputFormatting.insert(.withoutEscapingSlashes)
+        return encoder
+    }
 
     static func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
         try decoder().decode(type, from: data)

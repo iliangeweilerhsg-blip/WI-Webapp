@@ -2902,6 +2902,14 @@ Ergänzt 08 §4 und §11.1/§11.3. Wo dieser Abschnitt älteren Stellen widerspr
 
 **Bekannter Folgepunkt (eigenes Ticket #382, nicht Teil von §23):** v1 hat denselben Fehler schon heute. Ab etwa 28 000 bis 30 000 der erlaubten 31 250 Punkte (je nach Anteil von `/` im Base64) ist die kodierte `stroke.add` größer als `SyncEngine.maxMessageBytes`, und der Strich landet in der Fehlerablage. Regel 2 hilft dort nicht, weil es kein `sizes` zum Weglassen gibt. Die Lösung (kleinere Punktgrenze für v1, Encoder ohne `\/` oder höhere Grenze der `SyncEngine`) klärt das eigene Ticket.
 
+**Entscheidung zu #382 (umgesetzt mit V2-3):** Beides, Encoder und Grenze. Die Grenze der `SyncEngine` bleibt bei 1 000 000 Byte.
+
+- **Encoder:** `SGSync.encoder()` (`packages/schemas/swift-support/Sources/SyncMessages.swift`) setzt `.withoutEscapingSlashes`. Alle Operationen und Client-Nachrichten des Sync gehen über ihn (`SGSyncOp.encode()`, `SGClientMessage.encode()`). JSON erlaubt `/` unmaskiert, der Core-Parser liest `/` und `\/` gleich, und der Vergleich bei einer wiederholten `op_id` läuft über den gelesenen Inhalt (`canonicalJson`), nicht über den Text. Das generierte `newJSONEncoder()` bleibt unverändert und dient nur noch den REST-Aufrufen (`CoreClient`). Damit hängt die Größe einer Nachricht nicht mehr vom Anteil der `/` im Base64 ab.
+- **Das allein reicht nicht:** Ein v1-Strich mit 31 250 Punkten hat 1 000 000 Zeichen Base64, mit Umschlag also mehr als `SyncEngine.maxMessageBytes`, auch ohne `\/`.
+- **Grenze für v1 (`InkStrokeCodec.maxPointsSent`):** Das iPad sendet höchstens **29 000 Punkte** je Strich (928 000 Zeichen Base64, mit Umschlag unter 950 000 Byte, auch nach `InkOpBuilder.correct`). Längere Striche werden wie bisher gleichmäßig ausgedünnt, erster und letzter Punkt bleiben. Die Grenze des Formats (31 250 Punkte, 750 000 Byte) bleibt für den Core unverändert. Das ändert „`points` ist für jeden Strich identisch mit der v1-Kodierung“ (oben) nur für Striche mit mehr als 29 000 Punkten, die bisher ohnehin meist in der Fehlerablage landeten. Ein Strich zwischen 29 001 und etwa 30 000 Punkten, der den Core früher erreichte, gilt beim nächsten Abgleich als geändert (`points` ist kürzer) und wird einmal neu gesendet.
+- **Regel 2 und die Zählung:** Gemessen wird weiter `json.utf8.count` der fertigen Operation. Ohne `\/` ist die Zählung dieselbe wie die der `SyncEngine`, die Reserve von 50 000 Byte bleibt.
+- Bereits in der Warteschlange stehende Operationen behalten ihren gespeicherten Text (mit `\/`). Eine davon über 1 000 000 Byte landet weiter in der Fehlerablage.
+
 ### 23.4 Fähigkeit des Core: `welcome.features`
 
 `SyncWelcome` bekommt ein **optionales** Feld `features`: eine Liste von Zeichenketten, jede höchstens einmal. Der Core sendet `["stroke_sizes"]`. Fehlt das Feld, gilt es als leer. Clients ignorieren unbekannte Einträge.
