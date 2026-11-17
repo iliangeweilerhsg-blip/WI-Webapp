@@ -826,6 +826,7 @@ describe('Inbox: Neuverbinden', () => {
     const listeners = new Map<string, Set<(data: unknown) => void>>();
     const sync = {
       connectionState: 'online',
+      linkState: 'online',
       connect: vi.fn(async () => undefined),
       disconnect: vi.fn(),
       onEvent: vi.fn((name: string, fn: (data: unknown) => void) => {
@@ -837,7 +838,8 @@ describe('Inbox: Neuverbinden', () => {
     };
     const setState = (state: string) => {
       sync.connectionState = state;
-      for (const fn of listeners.get('connection') ?? []) fn({ state, retryInMs: null, closeCode: null });
+      sync.linkState = state;
+      for (const fn of listeners.get('link') ?? []) fn({ state });
     };
     const { SyncProvider } = await import('../src/lib/sync/SyncProvider.tsx');
     const { unmount } = render(
@@ -858,7 +860,7 @@ describe('Inbox: Neuverbinden', () => {
     act(() => setState('online'));
     await waitFor(() => expect(overviews()).toBeGreaterThan(before));
     unmount();
-    expect([...(listeners.get('connection') ?? [])]).toHaveLength(0);
+    expect([...(listeners.get('link') ?? [])]).toHaveLength(0);
   });
 });
 

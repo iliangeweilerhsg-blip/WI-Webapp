@@ -379,7 +379,7 @@ describe('MarkerControls: Reset, Uhrabgleich, Meldungen', () => {
     await expect(opts.onReset()).rejects.toBeDefined();
     core.down = false;
     core.markers = [marker(1, 'frage'), marker(2, 'klausur')];
-    await sync.emit('connection', { state: 'online', retryInMs: null, closeCode: null });
+    await sync.emit('link', { state: 'online' });
     await waitFor(() => expect(sync.subscribe).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(counts()).toEqual(['1', '1', '0']));
   });

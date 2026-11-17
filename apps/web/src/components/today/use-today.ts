@@ -188,9 +188,9 @@ export function useTodayData(now: number | null): TodayData {
   useEffect(() => {
     if (!sync || !range) return;
     const offUpdated = sync.onEvent('session.updated', apply);
-    let wasDown = sync.connectionState !== 'online';
+    let wasDown = sync.linkState !== 'online';
     const refetch = () => void client.invalidateQueries({ queryKey: SESSIONS_KEY });
-    const offConnection = sync.onEvent('connection', (c) => {
+    const offLink = sync.onEvent('link', (c) => {
       if (c.state === 'online') {
         if (wasDown) refetch();
         wasDown = false;
@@ -201,7 +201,7 @@ export function useTodayData(now: number | null): TodayData {
     const offLeader = sync.onEvent('leader.changed', refetch);
     return () => {
       offUpdated();
-      offConnection();
+      offLink();
       offLeader();
     };
   }, [sync, range, apply, client]);
