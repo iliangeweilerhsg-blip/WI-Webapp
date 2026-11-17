@@ -73,7 +73,7 @@ Eine beendete Session bekommt einen Foliensatz, oder ein falscher Satz wird nach
 
 ## 8. Offene Punkte für den Lead
 
-Die Punkte 3 und 11 bis 14 sind entschieden (Lead, 17.11., Kommentar an PR #371). Die übrigen sind weiter offen.
+Die Punkte 3 und 11 bis 15 sind entschieden (Lead, 17.11., Kommentar an PR #371). Die übrigen sind weiter offen.
 
 1. **Vorschlag bei Dozenten, die alle Sätze vorab hochladen.** „Neuester freier“ trifft dann den Satz der letzten Vorlesung. Mögliche Verfeinerung ohne Schema-Änderung: zuerst der freie Satz, dessen Titel die Nummer der Vorlesung (`session.number`) trägt, sonst der neueste. Nicht festgeschrieben, weil der Owner „neuester“ entschieden hat.
 2. **Neue Fassung als falscher Vorschlag** (§22.2). Der Core kennt die Verbindung alt ↔ neu nicht. Abhilfe wäre eine Spalte „ersetzt“ am Satz (Schema, mit F-ORG-02). Bis dahin korrigiert ein Klick.
@@ -89,4 +89,4 @@ Die Punkte 3 und 11 bis 14 sind entschieden (Lead, 17.11., Kommentar an PR #371)
 12. **Lücke zwischen „15 min vorher“ und dem Start: entschieden (Lead, 17.11.), vorerst keine Änderung.** In diesem Fenster gibt es keinen weiteren Abgleich. Lädt der Dozent dann hoch, zeigt die Start-Karte den Satz noch nicht, die Live-Ansicht bietet ihn rund ein bis zwei Minuten nach dem Start an. Was der Owner im Hörsaal erlebt, entscheidet: Erst danach kommt gegebenenfalls ein Abgleich 5 min vor Beginn. Der Owner bekommt die Lücke als Hinweis in der Test-Checkliste (F5). In dasselbe Fenster fallen ein Core-Neustart und Sessions, die der Kalender-Import direkt in `bereit` anlegt (§17.8, „Fälle ohne Anlass 1“).
 13. **Neuer Moodle-Login während der Vorlesung: entschieden (Lead, 17.11.), zur Kenntnis genommen.** Er greift für den Abgleich zur Vorlesung erst nach bis zu 10 min (die Drossel zählt auch Anstöße ohne Zugang, damit nichts im Minutentakt prüft). „Jetzt abgleichen“ in Einstellungen › Moodle wirkt sofort.
 14. **Der Lauf gleicht auch Übungsblätter und Fristen ab: entschieden (Lead, 17.11.), zur Kenntnis genommen.** Der Lauf zur Vorlesung gleicht den ganzen Kurs ab, nicht nur Folien (§17.8, „Was der Lauf tut“). Ein eigener Zweig „nur Folien“ ist nicht vorgesehen.
-15. **`last_run` und Schema: entschieden nach Review (17.11.).** Ein Lauf `vorlesung` überschreibt `last_run` nicht (Lead), er steht nur im Protokoll und intern in `lastLectureRun`. Darum ist `vorlesung` kein Wert in `MoodleSyncTrigger`: Er wäre über die API nie sichtbar (§17.8, „Schema“). Den Verzicht auf den Enum-Wert hat der Subagent entschieden, bitte gegenlesen: Die erste Fassung sah den Wert vor.
+15. **`last_run` und Schema: entschieden nach Review (17.11.).** Ein Lauf `vorlesung` überschreibt `last_run` nicht (Lead), er steht nur im Protokoll und intern in `lastLectureRun`. Darum ist `vorlesung` kein Wert in `MoodleSyncTrigger`: Er wäre über die API nie sichtbar (§17.8, „Schema“). Die erste Fassung sah den Enum-Wert vor, der Verzicht ist nach Review bestätigt (Lead).
