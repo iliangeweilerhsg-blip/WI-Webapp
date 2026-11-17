@@ -29,7 +29,7 @@ Eine Vorlesung soll ohne Zutun mit den richtigen Folien laufen. Heute läuft jed
 
 - **Maßgeblich** ist nur `session.slide_deck_id`. `slide_deck.session_id` bleibt ein Hinweis.
 - **Frei** = wählbar (nicht gelöscht, `ingest_state ≠ fehler`) und von keiner anderen nicht gelöschten Session außer `verpasst` getragen. Der aktuelle Satz der Session steht immer in der Liste, auch bei `fehler`. `used_by` ist ein eigener kleiner Typ `DeckUse`.
-- **Vorschlag** = neuester freier Satz nach `available_at` (Moodle-`timemodified`, sonst `uploaded_at`).
+- **Vorschlag** = neuester freier Satz nach `available_at` (Moodle-`timemodified`, sonst `uploaded_at`). Auch ohne Session (spontaner Start) gilt dieselbe Regel.
 - **Abruf:** `GET /modules/{id}/deck-options?session_id` → `DeckOptions` (ein Endpunkt für Start-Karte, spontanen Start und Live-Ansicht).
 - **Setzen, wechseln, leeren:** `PATCH /sessions/{id}` in `geplant`, `bereit`, `laeuft`, `pausiert`. Wechseln und Leeren nur vor dem ersten Folienwechsel, sonst `409 slide_deck_locked` (maßgeblich ist der Zeiger, auch bei gelöschtem Satz). `title` und `slide_deck_id` in einem Aufruf: alles oder nichts. Abgeschlossen: `409 slide_deck_session_closed`.
 - **Start:** Der Core wählt nie selbst. Die Web-App schickt den Vorschlag als `slide_deck_id` mit und startet im Zweifel ohne Satz.

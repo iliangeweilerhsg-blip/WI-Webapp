@@ -6808,8 +6808,9 @@ struct DeckOptions: Codable {
     let lock: DeckLock?
     let moduleID: String
     let sessionID: String?
-    /// Erster freier Satz in der Reihenfolge von items, sonst null. Null, wenn die Session schon
-    /// einen Satz hat oder abgeschlossen ist
+    /// Erster freier Satz in der Reihenfolge von items, sonst null. Auch ohne session_id
+    /// (spontaner Start). Null, wenn die Session schon einen Satz dieses Moduls hat oder
+    /// abgeschlossen ist
     let suggestedDeckID: String?
 
     enum CodingKeys: String, CodingKey {

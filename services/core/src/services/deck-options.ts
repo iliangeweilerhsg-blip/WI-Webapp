@@ -115,7 +115,8 @@ export async function getDeckOptions(
   const closed = own ? (CLOSED_SESSION_STATES as readonly string[]).includes(own.state) : false;
   const currentRow = pointer ? deckRows.find((d) => d.id === pointer) : undefined;
   const currentDeckId = currentRow ? currentRow.id : null;
-  const suggested = !own || closed || currentDeckId ? null : (all.find((o) => o.free)?.deck.id ?? null);
+  // Ohne `session_id` (spontaner Start, §22.7) gilt dieselbe Regel: der erste freie Satz
+  const suggested = closed || currentDeckId ? null : (all.find((o) => o.free)?.deck.id ?? null);
 
   // Die ersten 50, dazu der aktuelle Satz und der Vorschlag, falls sie dahinter liegen
   const items = all.filter(

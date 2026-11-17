@@ -575,7 +575,9 @@ async function startSession(
   }
 
   let slideDeckId = row.slideDeckId;
-  if (input.slideDeckId) {
+  // §22.4: Ein mitgeschickter Satz setzt nur, wenn die Session noch keinen gültigen Satz hat (null, gelöscht oder
+  // aus einem anderen Modul). Sonst wird er ignoriert und nicht einmal geprüft. Nur lesend, keine neue Sperre.
+  if (input.slideDeckId && !(await usableDeckId(tx, row.slideDeckId, row.moduleId))) {
     if (input.origin === 'server') await requireDeck(tx, input.slideDeckId, row.moduleId);
     slideDeckId = (await usableDeckId(tx, input.slideDeckId, row.moduleId)) ?? slideDeckId;
   }

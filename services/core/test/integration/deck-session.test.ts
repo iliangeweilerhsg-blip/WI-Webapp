@@ -235,19 +235,47 @@ describe('GET /modules/{id}/deck-options (§22.2, §22.3)', () => {
     expect(anon).toMatchObject({
       session_id: null,
       current_deck_id: null,
-      suggested_deck_id: null,
+      suggested_deck_id: null, // der einzige Satz ist belegt
       lock: null,
     });
     expect(anon.items[0]).toMatchObject({ free: false });
     expect(anon.items[0]!.used_by).toHaveLength(1);
   });
 
-  it('ohne session_id gibt es keinen Vorschlag, auch wenn Sätze frei sind', async () => {
-    await mkDeck();
+  it('ohne session_id: Vorschlag ist der neueste freie Satz des Moduls, sonst null; current_deck_id und lock bleiben null', async () => {
+    // Kein Satz: kein Vorschlag
+    expect((await optionsOk(mod)).suggested_deck_id).toBeNull();
+    const older = await mkDeck({ uploadedAt: '2026-11-01T09:00:00Z' });
+    const newest = await mkDeck({ uploadedAt: '2026-11-05T09:00:00Z' });
     const res = await optionsOk(mod);
-    expect(res.suggested_deck_id).toBeNull();
-    expect(res.items).toHaveLength(1);
-    expect(res.items[0]!.free).toBe(true);
+    expect(res).toMatchObject({
+      session_id: null,
+      current_deck_id: null,
+      lock: null,
+      suggested_deck_id: newest,
+    });
+    expect(res.items.map((o) => o.deck.id)).toEqual([newest, older]);
+    // Der neueste ist belegt: der Vorschlag rückt auf den nächsten freien
+    await mkSession({ state: 'beendet', deck: newest });
+    expect((await optionsOk(mod)).suggested_deck_id).toBe(older);
+    // Alle belegt: null
+    await mkSession({ state: 'bereit', deck: older });
+    expect((await optionsOk(mod)).suggested_deck_id).toBeNull();
+  });
+
+  it('ohne session_id: ein Satz, den nur eine verpasst-Session trägt, gilt als frei und wird vorgeschlagen', async () => {
+    const deck = await mkDeck();
+    await mkSession({ state: 'verpasst', deck });
+    const res = await optionsOk(mod);
+    expect(res.items[0]).toMatchObject({ free: true, used_by: [] });
+    expect(res.suggested_deck_id).toBe(deck);
+  });
+
+  it('ohne session_id: Sätze anderer Module, gelöschte und fehlerhafte werden nicht vorgeschlagen', async () => {
+    await mkDeck({ module: otherMod });
+    await mkDeck({ deleted: true });
+    await mkDeck({ state: 'fehler' });
+    expect((await optionsOk(mod)).suggested_deck_id).toBeNull();
   });
 
   it('gelöscht und fehler sind nicht wählbar, neu und verarbeitet schon; fremde Module nicht', async () => {
@@ -497,6 +525,77 @@ describe('PATCH /sessions/{id} mit slide_deck_id (§22.4)', () => {
     expect(res.statusCode).toBe(200);
   });
 
+  it('POST /sessions mit slide_deck_id (spontaner Start): setzt den Satz, Hinweis und Ereignis; Fehler legen nichts an', async () => {
+    const deck = await mkDeck();
+    const post = (body: Record<string, unknown>) =>
+      t.request({ method: 'POST', url: `${API}/sessions`, payload: body });
+    const res = await post({ module_id: mod, slide_deck_id: deck });
+    expect(res.statusCode).toBe(201);
+    const created = res.json() as { id: string; slide_deck_id: string | null; state: string };
+    expect([created.state, created.slide_deck_id]).toEqual(['bereit', deck]);
+    expect((await sessionRow(created.id)).slide_deck_id).toBe(deck);
+    expect(await deckHint(deck)).toBe(created.id);
+    expect(updatedFor(created.id)).toHaveLength(1);
+    // Danach ist der Satz belegt, der Vorschlag rückt weiter
+    expect((await optionsOk(mod)).items.find((o) => o.deck.id === deck)?.free).toBe(false);
+    const before = (await t.handle.sql`SELECT 1 FROM session`).length;
+    let bad = await post({ module_id: mod, slide_deck_id: uuidv7() });
+    expect([bad.statusCode, errCode(bad)]).toEqual([404, 'slide_deck_not_found']);
+    bad = await post({ module_id: mod, slide_deck_id: await mkDeck({ deleted: true }) });
+    expect([bad.statusCode, errCode(bad)]).toEqual([404, 'slide_deck_not_found']);
+    bad = await post({ module_id: mod, slide_deck_id: await mkDeck({ module: otherMod }) });
+    expect([bad.statusCode, errCode(bad)]).toEqual([400, 'slide_deck_module_mismatch']);
+    expect(await t.handle.sql`SELECT 1 FROM session`).toHaveLength(before);
+  });
+
+  describe('POST /sessions/{id}/start mit slide_deck_id (§22.4): setzt nur, wenn noch kein gültiger Satz da ist', () => {
+    const start = (id: string, deck: string) =>
+      t.request({
+        method: 'POST',
+        url: `${API}/sessions/${id}/start`,
+        payload: { started_from: 'mac', slide_deck_id: deck },
+      });
+
+    it('Session hat schon einen Satz: der mitgeschickte (veraltete) wird ignoriert, 200, auch ein unbekannter', async () => {
+      const own = await mkDeck();
+      const stale = await mkDeck();
+      const ses = await mkSession({ state: 'bereit', deck: own });
+      const res = await start(ses, stale);
+      expect(res.statusCode).toBe(200);
+      expect((await sessionRow(ses)).slide_deck_id).toBe(own);
+      expect(await deckHint(stale)).toBeNull();
+      const ses2 = await mkSession({ state: 'geplant', deck: own });
+      expect((await start(ses2, uuidv7())).statusCode).toBe(200);
+      expect((await sessionRow(ses2)).slide_deck_id).toBe(own);
+    });
+
+    it('Session ohne Satz: der mitgeschickte wird gesetzt; fremd oder gelöscht: 404 bzw. 400', async () => {
+      const deck = await mkDeck();
+      const ses = await mkSession({ state: 'bereit' });
+      const bad = await start(ses, await mkDeck({ module: otherMod }));
+      expect([bad.statusCode, errCode(bad)]).toEqual([400, 'slide_deck_module_mismatch']);
+      const gone = await start(ses, await mkDeck({ deleted: true }));
+      expect([gone.statusCode, errCode(gone)]).toEqual([404, 'slide_deck_not_found']);
+      expect((await sessionRow(ses)).slide_deck_id).toBeNull();
+      expect((await start(ses, deck)).statusCode).toBe(200);
+      expect((await sessionRow(ses)).slide_deck_id).toBe(deck);
+      expect(await deckHint(deck)).toBe(ses);
+    });
+
+    it('Zeiger auf gelöschten Satz (oder Satz eines anderen Moduls): zählt als kein Satz, der mitgeschickte wird gesetzt', async () => {
+      const deck = await mkDeck();
+      const dead = await mkDeck({ deleted: true });
+      const ses = await mkSession({ state: 'bereit', deck: dead });
+      expect((await start(ses, deck)).statusCode).toBe(200);
+      expect((await sessionRow(ses)).slide_deck_id).toBe(deck);
+      const deck2 = await mkDeck();
+      const foreign = await mkDeck({ module: otherMod });
+      const ses2 = await mkSession({ state: 'bereit', deck: foreign });
+      expect((await start(ses2, deck2)).statusCode).toBe(200);
+      expect((await sessionRow(ses2)).slide_deck_id).toBe(deck2);
+    });
+  });
+
   it('Satz fehlt oder gelöscht: 404; anderes Modul: 400; Zustandsprüfung geht vor', async () => {
     const ses = await mkSession();
     let res = await patch(ses, { slide_deck_id: uuidv7() });
@@ -579,7 +678,7 @@ describe('PATCH /sessions/{id} mit slide_deck_id (§22.4)', () => {
     expect(errCode(await patch(gone, { slide_deck_id: null }))).toBe('session_not_found');
   });
 
-  it('Start mit slide_deck_id in bereit überschreibt ohne Sperrprüfung (§22.4)', async () => {
+  it('Start mit slide_deck_id in bereit überschreibt einen vorhandenen gültigen Satz nicht mehr (§22.4)', async () => {
     const a = await mkDeck();
     const b = await mkDeck();
     const ses = await mkSession({ state: 'bereit', deck: a });
@@ -589,7 +688,7 @@ describe('PATCH /sessions/{id} mit slide_deck_id (§22.4)', () => {
       payload: { started_from: 'mac', slide_deck_id: b },
     });
     expect(res.statusCode).toBe(200);
-    expect((await sessionRow(ses)).slide_deck_id).toBe(b);
+    expect((await sessionRow(ses)).slide_deck_id).toBe(a);
   });
 });
 
@@ -637,6 +736,8 @@ describe('Upload mit session_id (§22.5)', () => {
       ).rejects.toMatchObject({ statusCode: 409, code: 'slide_deck_session_closed', details: { state } });
       expect(await t.handle.sql`SELECT 1 FROM slide_deck`).toHaveLength(0);
       expect(await t.handle.sql`SELECT 1 FROM job`).toHaveLength(0);
+      // Die hochgeladene Temp-Datei wurde nie verschoben (der Aufrufer räumt sie auf)
+      expect(existsSync(up.tmpPath)).toBe(true);
       // Keine Datei im Satz-Ordner (nichts abgelegt, nichts liegen geblieben)
       const decksDir = join(dataDir, 'media', 'decks');
       expect(existsSync(decksDir) ? readdirSync(decksDir) : []).toEqual(decksBefore);
@@ -979,30 +1080,52 @@ describe('Nebenläufigkeit (§22.4, §22.5, §16.2)', () => {
     expect(await t.handle.sql`SELECT 1 FROM slide_deck WHERE id = ${dead}`).toHaveLength(0);
   });
 
-  it('PATCH ‖ endgültiges Löschen über purgeTrashItems: 200, kein 40P01', async () => {
+  it('PATCH ‖ purgeTrashItems des gelöschten Satzes: echter Deadlock-Test (Purge hält den Satz, PATCH läuft dazwischen), kein 40P01', async () => {
     const dead = await mkDeck({ deleted: true });
     const b = await mkDeck();
     const ses = await mkSession({ state: 'bereit', deck: dead });
+    await t.handle.sql`UPDATE slide_deck SET session_id = ${ses} WHERE id = ${dead}`;
+    // Der echte Purge nimmt den Satz `FOR UPDATE` und löscht ihn danach (der FK `SET NULL` braucht die Session-Zeile).
+    // Damit der Purge den Satz hält, während PATCH die Session-Zeile nimmt, hält ihn ein BEFORE-DELETE-Trigger an
+    // einer Advisory-Sperre an: Der Purge hat dann den Satz gesperrt, aber noch nicht die Session-Zeile.
+    const key = 7_360_001;
+    await t.handle.sql.unsafe(`
+      CREATE OR REPLACE FUNCTION test_purge_pause() RETURNS trigger LANGUAGE plpgsql AS $f$
+      BEGIN PERFORM pg_advisory_xact_lock(${key}); RETURN OLD; END $f$;
+      CREATE TRIGGER test_purge_pause BEFORE DELETE ON slide_deck FOR EACH ROW EXECUTE FUNCTION test_purge_pause();
+    `);
     const gate = await t.handle.sql.reserve();
-    let patched: Promise<{ statusCode: number }> | undefined;
     let purged: Promise<unknown> | undefined;
+    let patched: Promise<{ statusCode: number }> | undefined;
     try {
       await gate`BEGIN`;
-      await gate`SELECT id FROM slide_deck WHERE id = ${dead} FOR UPDATE`;
-      patched = patch(ses, { slide_deck_id: b });
-      await settledOrBlocked(patched);
+      await gate`SELECT pg_advisory_xact_lock(${key})`;
       purged = purgeTrashItems(t.handle.db, raceDir, [{ kind: 'slide_deck', id: dead }]).catch(
         (e: unknown) => e,
       );
+      await waitForBlocked(1); // Der Purge hält den Satz und hängt im Trigger
+      patched = patch(ses, { slide_deck_id: b });
+      // Neuer Code: PATCH fasst den gelöschten Satz nicht an und ist fertig. Alter Code: PATCH hängt am Satz.
+      let patchDone = false;
+      void patched.then(
+        () => (patchDone = true),
+        () => (patchDone = true),
+      );
+      await vi.waitFor(async () => expect(patchDone || (await blockedCount()) >= 2).toBe(true), {
+        timeout: 5_000,
+        interval: 25,
+      });
       await gate`COMMIT`;
     } finally {
       await gate`ROLLBACK`.catch(() => undefined);
       gate.release();
+      await t.handle.sql.unsafe('DROP TRIGGER IF EXISTS test_purge_pause ON slide_deck');
     }
     const [res, pr] = await Promise.allSettled([patched, purged]);
     expect(res.status).toBe('fulfilled');
     expect((res as PromiseFulfilledResult<{ statusCode: number }>).value.statusCode).toBe(200);
     expect(pr.status).toBe('fulfilled');
+    expect(errorCode((pr as PromiseFulfilledResult<unknown>).value)).toBeUndefined();
     expect((pr as PromiseFulfilledResult<unknown>).value).not.toBeInstanceOf(Error);
     expect((await sessionRow(ses)).slide_deck_id).toBe(b);
     expect(await t.handle.sql`SELECT 1 FROM slide_deck WHERE id = ${dead}`).toHaveLength(0);
