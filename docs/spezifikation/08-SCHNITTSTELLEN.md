@@ -142,7 +142,8 @@ Ab Phase 2 geplant:
   "t_end_ms": 2531980,
   "transform": [1,0,0,1,0,0],   // affine Transformation (Lasso-Verschiebung)
   "bbox": [x, y, w, h],         // in Seitenkoordinaten (pt, Ursprung oben links)
-  "points": "<base64>"          // gepackt, siehe 4.2
+  "points": "<base64>",         // gepackt, siehe 4.2
+  "sizes": "<base64>"           // optional: Breite und Höhe je Punkt, siehe 4.2 (Format v2)
 }
 ```
 
@@ -156,6 +157,14 @@ Optionaler Glättung wird beim Rendern angewendet, nie beim Speichern. Ein durch
 - `dt` des ersten Punkts ist `0`, `dt` steigt monoton. `t_end_ms − t_start_ms` entspricht dem `dt` des letzten Punkts.
 - Ein Punkt hat genau 24 Byte, also 32 Base64-Zeichen. `points` hat darum nie Padding und mindestens einen Punkt.
 
+**Format v2: Breite je Punkt (`sizes`, VERTRAEGE §23):**
+- `sizes` ist optional. Fehlt es, ist der Strich im Format v1 und wird wie bisher aus `width` und `force` gezeichnet. `sizes` ist nie `null`.
+- Pro Punkt 2 Werte als `Float32` little-endian: `width`, `height` (pt, vor `transform`). Das ist die Größe des Punkts aus `PKStrokePoint.size`. Der i-te Eintrag gehört zum i-ten Punkt in `points`, die Anzahl ist gleich.
+- 8 Byte je Punkt: Base64 mit Padding, wo nötig.
+- `points` und `sizes` zusammen höchstens 750 000 Byte. Das sind 31 250 Punkte ohne und 23 437 Punkte mit `sizes`.
+- `width` bleibt der Median von `max(width, height)` der Punkte. `points` ändert sich durch v2 nicht.
+- Das iPad sendet `sizes` nur, wenn der Core im `welcome` die Fähigkeit `stroke_sizes` meldet.
+
 ### 4.3 Zuordnung PencilKit ↔ neutrales Format (iPad)
 - **Quelle der Wahrheit auf dem iPad** ist `PKDrawing` (verlustfrei). Das neutrale Format wird daraus abgeleitet.
 - **Stabile IDs:** PencilKit-Striche haben keine ID. Das iPad hält pro Seite eine Zuordnung `Fingerabdruck → client_id`. Fingerabdruck = Hash aus `path.creationDate`, Punktanzahl und den ersten 3 Punkten (vor Transformation). Bei jeder Änderung (`canvasViewDrawingDidChange`) wird der Strichbestand mit der Zuordnung verglichen:
@@ -163,7 +172,7 @@ Optionaler Glättung wird beim Rendern angewendet, nie beim Speichern. Ein durch
   - verschwundene → `stroke.remove`
   - gleicher Fingerabdruck, aber geänderte Eigenschaften (Lasso: `transform`; Umfärben: `color`; Skalieren) → nur `stroke.add` mit **gleicher** `client_id` und unveränderter Zeit. Der Server macht daraus ein Upsert.
   - Gleiche Fingerabdrücke auf einer Seite (z. B. kopierte Striche) werden nach ihrem Vorkommen in `PKDrawing.strokes` durchgezählt: Der Schlüssel ist `Fingerabdruck#n`. So bekommt jede Kopie eine eigene `client_id`.
-- **Werkzeuge:** `PKInkingTool.InkType` wird auf `tool` abgebildet, `PKInk.color` auf `color`. Die Breite kommt aus dem Werkzeug und der Punktgröße.
+- **Werkzeuge:** `PKInkingTool.InkType` wird auf `tool` abgebildet, `PKInk.color` auf `color`. `width` ist der Median der Punktgröße (`max(size.width, size.height)`). Die Größe je Punkt geht als `sizes` mit (4.2, Format v2).
 - Der Radierer im Pixelmodus teilt Striche in Teilstücke. Die Teilstücke werden zu neuen Strichen mit eigener `client_id`, aber der ursprünglichen `created_at`.
 
 ### 4.4 PageElement
