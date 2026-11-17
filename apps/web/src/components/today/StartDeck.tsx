@@ -5,7 +5,7 @@
 // Der Start wartet nie auf diese Abfrage: Sind die Optionen noch nicht da oder gescheitert, startet der Tipp ohne Satz.
 import { useEffect, useRef, useState } from 'react';
 import type { DeckOption, Session } from '@sg/shared';
-import { useDeckOptions } from '../../lib/material.ts';
+import { DECK_POLL_MS, useDeckOptions } from '../../lib/material.ts';
 import { readNoDeck, rememberNoDeck } from '../../lib/sessions.ts';
 import { DeckPicker } from '../slides/DeckPicker.tsx';
 import { useDeckChoice } from '../slides/use-deck-choice.ts';
@@ -32,14 +32,21 @@ export function useStartDeck(
   enabled: boolean,
   onSession: (session: Session) => void,
 ): StartDeck {
-  const query = useDeckOptions(session?.module_id ?? '', session?.id ?? null, {
-    enabled: enabled && session !== undefined,
-  });
   const choice = useDeckChoice(session, onSession);
-  const [noDeck, setNoDeck] = useState(false);
-  const [open, setOpen] = useState(false);
   // Ein Upload für diese Session läuft oder lief: Er hängt den Satz selbst an, der Start schickt nichts mit
   const [uploading, setUploading] = useState(false);
+  // Neue Sätze (Moodle-Abgleich zur Vorlesung §22.6, anderer Tab, Modulseite) sollen von selbst auf der Karte stehen:
+  // beim Sichtbarwerden des Tabs und alle 60 s im sichtbaren Tab. Genau ein Intervall je Karte (die eine Start-Karte
+  // von Heute, `enabled` nur bei `bevorstehend`/`bereit`); nicht während einer Wahl oder eines Uploads, die die
+  // Optionen selbst setzen. Der Start wartet weiter nie darauf (B1, §22.4).
+  const poll = enabled && session !== undefined && !choice.busy && !uploading;
+  const query = useDeckOptions(session?.module_id ?? '', session?.id ?? null, {
+    enabled: enabled && session !== undefined,
+    refetchOnVisible: poll,
+    refetchInterval: poll ? DECK_POLL_MS : false,
+  });
+  const [noDeck, setNoDeck] = useState(false);
+  const [open, setOpen] = useState(false);
   const sessionId = session?.id;
   useEffect(() => {
     setNoDeck(sessionId ? readNoDeck(sessionId) : false);
