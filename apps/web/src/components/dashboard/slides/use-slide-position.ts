@@ -29,7 +29,7 @@ export function latestSlideEvent(snapshot: SessionSnapshot): SlidePosition | nul
   return best;
 }
 
-type SyncSource = Pick<SyncClient, 'subscribe' | 'onEvent' | 'connectionState'>;
+type SyncSource = Pick<SyncClient, 'subscribe' | 'onEvent'>;
 
 /**
  * Hält den Stand aktuell und liefert ihn: lädt den Snapshot, abonniert den Strom ab dessen Position und übernimmt
@@ -117,7 +117,9 @@ function followSlides(queryClient: QueryClient, sessionId: string, client: SyncS
   };
 
   void establish();
-  const offConnection = client.onEvent('connection', (c) => {
+  // `link` (nicht `connection`): Im Folge-Tab bleibt `connection` bei `other_tab`, `link` zeigt die Mitlese-Verbindung
+  // (VERTRAEGE §11.8). Im Leader-Tab sind beide gleich.
+  const offConnection = client.onEvent('link', (c) => {
     if (c.state === 'online' && needsReload) void establish();
   });
   return () => {
