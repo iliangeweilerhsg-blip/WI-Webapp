@@ -191,6 +191,7 @@ enum InkStrokeCodec {
             createdAt: createdAt,
             layer: sample.layer,
             points: packPoints(points),
+            sizes: nil,
             tEndMS: end,
             tStartMS: start,
             tool: sample.tool,

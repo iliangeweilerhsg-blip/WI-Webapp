@@ -1,0 +1,14 @@
+{
+  "client_id": "019a4e14-d002-7c22-9d33-3c6a1f7b8e42",
+  "tool": "fountain",
+  "layer": "ink",
+  "color": "#0F355CFF",
+  "width": 3.2,
+  "created_at": 1762246581000,
+  "t_start_ms": 381000,
+  "t_end_ms": 381000,
+  "transform": [1, 0, 0, 1, 0, 0],
+  "bbox": [78.4, 88.4, 3.2, 3.2],
+  "points": "AACgQgAAtEIAAAAAMzMzPwAAAD8AAIA/",
+  "sizes": "zcxMQM3MTEA="
+}

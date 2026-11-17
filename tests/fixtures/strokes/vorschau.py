@@ -6,6 +6,7 @@ Eigenschaften:
 - Zwei Ebenen: zuerst `highlight` (Textmarker unter der Schrift), darüber `ink` (Schrift)
 - Affine Transformation `transform` ([a, b, c, d, e, f]) auf alle Punkte angewandt
 - Darstellung als Segmente mit Farbe, Deckkraft (`#RRGGBBAA`) und druckabhängiger Breite (`width * force`, bei `monoline`/`marker` konstant)
+- Striche mit `sizes` (Format v2, VERTRAEGE §23): Breite je Segment aus `max(width, height)` der Punkte, mit dem Maßstab von `transform`
 
 Ausführung:
     python3 tests/fixtures/strokes/vorschau.py
@@ -16,7 +17,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from stroke_format import apply_transform, unpack_points
+from stroke_format import apply_transform, unpack_points, unpack_sizes
 
 FIXTURES_DIR = Path(__file__).resolve().parent
 VORSCHAU_DIR = FIXTURES_DIR / "vorschau"
@@ -46,6 +47,29 @@ def render_stroke_svg(stroke: dict) -> list[str]:
     ]
 
     elems: list[str] = []
+    if "sizes" in stroke and tool != "marker":
+        # Format v2: Durchmesser je Punkt aus `sizes` (vor transform), skaliert mit dem Maßstab von transform
+        a, b, c, d = transform[0], transform[1], transform[2], transform[3]
+        scale = abs(a * d - b * c) ** 0.5
+        diam = [max(w, h) * scale for w, h in unpack_sizes(stroke["sizes"])]
+        if len(transformed_pts) == 1:
+            x0, y0, _ = transformed_pts[0]
+            elems.append(
+                f'    <circle cx="{x0:.2f}" cy="{y0:.2f}" r="{diam[0] / 2.0:.2f}" '
+                f'fill="{rgb}" fill-opacity="{opacity}" />'
+            )
+            return elems
+        for i in range(len(transformed_pts) - 1):
+            x1, y1, _ = transformed_pts[i]
+            x2, y2, _ = transformed_pts[i + 1]
+            eff_w = max(0.1, (diam[i] + diam[i + 1]) / 2.0)
+            elems.append(
+                f'    <polyline points="{x1:.2f},{y1:.2f} {x2:.2f},{y2:.2f}" fill="none" stroke="{rgb}" '
+                f'stroke-opacity="{opacity}" stroke-width="{eff_w:.2f}" '
+                f'stroke-linecap="round" stroke-linejoin="round" />'
+            )
+        return elems
+
     if len(transformed_pts) == 1:
         x0, y0, f0 = transformed_pts[0]
         eff_w = width if tool in ("monoline", "marker") else max(0.4, width * max(0.2, f0))

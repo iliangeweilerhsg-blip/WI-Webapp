@@ -26,9 +26,9 @@ function referenceFloats(base64: string): number[] {
 }
 
 describe('Testdaten', () => {
-  it('7 Dateien mit 299 Strichen, alle passen zum Schema', () => {
-    expect(files).toHaveLength(7);
-    expect(all).toHaveLength(299);
+  it('8 Dateien mit 308 Strichen, alle passen zum Schema', () => {
+    expect(files).toHaveLength(8);
+    expect(all).toHaveLength(308);
     const res = PageStrokesSchema.safeParse({
       page_id: '019a4e14-0000-7000-8000-000000000001',
       stream_seq: 0,
@@ -40,7 +40,7 @@ describe('Testdaten', () => {
 });
 
 describe('decodePoints', () => {
-  it('liefert bei allen 299 Strichen Punktzahl und Werte wie die Referenz-Dekodierung', () => {
+  it('liefert bei allen 308 Strichen Punktzahl und Werte wie die Referenz-Dekodierung', () => {
     for (const s of all) {
       const raw = decodePoints(s.points);
       const ref = referenceFloats(s.points);

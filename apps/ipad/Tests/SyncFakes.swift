@@ -331,6 +331,7 @@ final class SyncHarness {
             createdAt: 1_762_246_500_000,
             layer: .ink,
             points: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            sizes: nil,
             tEndMS: tStart.map { $0 + 100 },
             tStartMS: tStart,
             tool: .pen,

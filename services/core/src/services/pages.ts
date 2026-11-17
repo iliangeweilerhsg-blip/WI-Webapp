@@ -69,6 +69,8 @@ export function toApiStroke(row: StrokeRow): Stroke {
     transform: row.transform as Stroke['transform'],
     bbox: row.bbox as Stroke['bbox'],
     points: Buffer.from(row.points).toString('base64'),
+    // Nur im Format v2. Bei v1 fehlt der Schlüssel (nie null, VERTRAEGE §23.6)
+    ...(row.sizes === null ? {} : { sizes: Buffer.from(row.sizes).toString('base64') }),
   };
 }
 

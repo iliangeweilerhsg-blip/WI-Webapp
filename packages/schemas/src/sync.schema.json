@@ -139,6 +139,15 @@
           "items": {
             "$ref": "#/$defs/SyncResume"
           }
+        },
+        "features": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Optional: Fähigkeiten des Core (VERTRAEGE §23.4). Fehlt das Feld, gilt es als leer. Bekannt: stroke_sizes (Core nimmt Stroke.sizes an). Clients ignorieren unbekannte Einträge"
         }
       },
       "description": "db_epoch ändert sich bei jeder Wiederherstellung der Datenbank. Weicht sie vom gespeicherten Wert ab, behandelt der Client alle Ströme wie reset (VERTRAEGE §11.1)."

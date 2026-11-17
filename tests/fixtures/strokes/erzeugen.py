@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministischer Generator für die 7 Strich-Format-Testfälle (08 §4.1 / §4.2).
+"""Deterministischer Generator für die 8 Strich-Format-Testfälle (08 §4.1 / §4.2, Fall 8 mit `sizes` nach VERTRAEGE §23).
 
 Erzeugt mit festem Zufalls-Seed:
 - 01-handschrift-pen.json
@@ -9,6 +9,7 @@ Erzeugt mit festem Zufalls-Seed:
 - 05-lasso-transform.json
 - 06-randfaelle.json
 - 07-notizseite-200-striche.json
+- 08-fueller-sizes.json (Format v2: Breite und Höhe je Punkt in `sizes`)
 
 Ausführung:
     python3 tests/fixtures/strokes/erzeugen.py
@@ -24,8 +25,11 @@ from typing import Sequence
 
 from stroke_format import (
     compute_bbox,
+    median_width,
     pack_points,
+    pack_sizes,
     unpack_points,
+    unpack_sizes,
     uuid7_from_rng,
 )
 
@@ -231,8 +235,20 @@ def make_stroke(
     t_start_ms: int | None,
     raw_points: Sequence[tuple[float, float, float, float, float, float]],
     transform: Sequence[float] = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0),
+    sizes: Sequence[tuple[float, float]] | None = None,
 ) -> dict:
-    """Erstellt ein vollständiges Stroke-Objekt nach 08 §4.1 und rundet bbox konsistent zu den Float32-Punkten."""
+    """Erstellt ein vollständiges Stroke-Objekt nach 08 §4.1 und rundet bbox konsistent zu den Float32-Punkten.
+
+    Mit `sizes` (Format v2, VERTRAEGE §23) entsteht zusätzlich das Feld `sizes`. `width` ist dann der Median von
+    `max(width, height)` der Punkte, der übergebene Wert wird ignoriert.
+    """
+    sizes_b64: str | None = None
+    if sizes is not None:
+        if len(sizes) != len(raw_points):
+            raise ValueError("sizes braucht genau einen Eintrag je Punkt")
+        sizes_b64 = pack_sizes(sizes)
+        lower, upper = median_width(unpack_sizes(sizes_b64))
+        width = (lower + upper) / 2.0
     b64 = pack_points(raw_points)
     unpacked = unpack_points(b64)
     last_dt = unpacked[-1][2]
@@ -250,6 +266,7 @@ def make_stroke(
         "transform": [round(float(v), 4) if isinstance(v, float) and not v.is_integer() else int(v) if float(v).is_integer() else v for v in transform],
         "bbox": bbox,
         "points": b64,
+        **({"sizes": sizes_b64} if sizes_b64 is not None else {}),
     }
 
 
@@ -778,6 +795,165 @@ def build_case_07(rng: random.Random) -> list[dict]:
     return all_strokes
 
 
+def _curve_points(
+    xy: Sequence[tuple[float, float]], forces: Sequence[float], *, altitude: float, azimuth: float, dt_step: float = 8.0
+) -> list[tuple[float, float, float, float, float, float]]:
+    """Punkte (x, y, dt, force, azimuth, altitude) entlang einer Kurve, dt steigt gleichmäßig ab 0."""
+    return [(x, y, i * dt_step, f, azimuth, altitude) for i, ((x, y), f) in enumerate(zip(xy, forces))]
+
+
+def build_case_08(rng: random.Random) -> list[dict]:
+    """Fall 8 (Format v2, VERTRAEGE §23): Breite und Höhe je Punkt in `sizes`.
+
+    Füller mit deutlichem Verlauf, Füller mit schräger Spitze (width != height), Kugelschreiber, Bleistift,
+    Textmarker, ein Strich mit Größe 0 am Ende, ein Strich mit skalierender `transform`, dazu 1 und 2 Punkte
+    (Padding `=` und `==`). `points` folgt wie bei den anderen Fällen dem Format v1.
+    """
+    strokes: list[dict] = []
+    epoch = BASE_EPOCH_MS + 120000
+    sess = BASE_SESSION_MS + 120000
+
+    def add(
+        raw: list,
+        sizes: list,
+        *,
+        tool: str,
+        layer: str,
+        color: str,
+        transform: Sequence[float] = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0),
+    ) -> None:
+        nonlocal epoch, sess
+        strokes.append(
+            make_stroke(
+                rng,
+                tool=tool,
+                layer=layer,
+                color=color,
+                width=0.0,
+                created_at=epoch,
+                t_start_ms=sess,
+                raw_points=raw,
+                transform=transform,
+                sizes=sizes,
+            )
+        )
+        dur = int(round(raw[-1][2])) + 400
+        epoch += dur
+        sess += dur
+
+    # 1. Füller mit deutlichem Verlauf: Durchmesser 1,2 -> 5,5 -> 1,4 pt entlang einer Welle
+    n = 72
+    xy = [(60.0 + 280.0 * i / (n - 1), 120.0 + 22.0 * math.sin(i / (n - 1) * math.pi * 2.0)) for i in range(n)]
+    diam = [1.2 + 4.3 * math.sin(math.pi * (i / (n - 1))) ** 1.5 for i in range(n)]
+    diam[-1] = 1.4
+    forces = [round(min(1.0, max(0.05, (d - 1.0) / 4.8)), 4) for d in diam]
+    add(
+        _curve_points(xy, forces, altitude=1.05, azimuth=0.48),
+        [(round(d, 3), round(d, 3)) for d in diam],
+        tool="fountain",
+        layer="ink",
+        color="#0F355CFF",
+    )
+
+    # 2. Füller mit schräger Spitze: width und height verschieden, die Breite hängt von der Strichrichtung ab
+    n = 64
+    amp, periods = 18.0, 2.0
+    xy = [(60.0 + 280.0 * i / (n - 1), 190.0 + amp * math.sin(i / (n - 1) * math.pi * 2.0 * periods)) for i in range(n)]
+    sizes = []
+    for i in range(n):
+        slope = amp * (2.0 * math.pi * periods / 280.0) * math.cos(i / (n - 1) * math.pi * 2.0 * periods)
+        heading = math.atan(slope)
+        sizes.append((round(1.4 + 3.4 * abs(math.sin(heading)), 3), 1.4))
+    forces = [round(0.3 + 0.4 * abs(math.sin(i / (n - 1) * math.pi * 2.0 * periods)), 4) for i in range(n)]
+    add(
+        _curve_points(xy, forces, altitude=0.9, azimuth=0.7),
+        sizes,
+        tool="fountain",
+        layer="ink",
+        color="#1864ABFF",
+    )
+
+    # 3. Kugelschreiber: fast gleichmäßig 2,4 pt
+    n = 56
+    xy = [(60.0 + 240.0 * i / (n - 1), 255.0 + 6.0 * math.sin(i / (n - 1) * math.pi * 3.0)) for i in range(n)]
+    sizes = [(round(2.4 + 0.12 * math.sin(i * 0.9), 3),) * 2 for i in range(n)]
+    add(
+        _curve_points(xy, [0.65] * n, altitude=1.18, azimuth=0.45),
+        sizes,
+        tool="pen",
+        layer="ink",
+        color="#1E2A44FF",
+    )
+
+    # 4. Bleistift: flache Neigung, breiter und unruhiger
+    n = 60
+    xy = [(60.0 + 240.0 * i / (n - 1), 315.0 + 8.0 * math.sin(i / (n - 1) * math.pi * 2.5)) for i in range(n)]
+    sizes = [(round(4.6 + 0.6 * math.sin(i * 0.5), 3),) * 2 for i in range(n)]
+    add(
+        _curve_points(xy, [0.5] * n, altitude=0.38, azimuth=0.6),
+        sizes,
+        tool="pencil",
+        layer="ink",
+        color="#3B3F46D9",
+    )
+
+    # 5. Textmarker: konstant 18 x 18 pt, untere Ebene
+    n = 30
+    xy = [(60.0 + 240.0 * i / (n - 1), 380.0) for i in range(n)]
+    add(
+        _curve_points(xy, [0.75] * n, altitude=1.0, azimuth=0.0),
+        [(18.0, 18.0)] * n,
+        tool="marker",
+        layer="highlight",
+        color="#FFE06666",
+    )
+
+    # 6. Füller mit Größe 0 am Ende (auslaufende Spitze)
+    n = 48
+    xy = [(60.0 + 200.0 * i / (n - 1), 440.0 - 14.0 * math.sin(i / (n - 1) * math.pi)) for i in range(n)]
+    diam = [1.6 + 3.2 * math.sin(math.pi * min(1.0, i / (n - 6))) for i in range(n)]
+    diam[-3:] = [0.8, 0.3, 0.0]
+    forces = [round(min(1.0, max(0.0, d / 5.0)), 4) for d in diam]
+    add(
+        _curve_points(xy, forces, altitude=1.05, azimuth=0.48),
+        [(round(d, 3), round(d, 3)) for d in diam],
+        tool="fountain",
+        layer="ink",
+        color="#0F355CFF",
+    )
+
+    # 7. Füller mit skalierender transform (Lasso: 1,5-fach vergrößert und verschoben). `sizes` bleiben vor transform
+    n = 40
+    xy = [(30.0 + 150.0 * i / (n - 1), 300.0 + 10.0 * math.sin(i / (n - 1) * math.pi * 2.0)) for i in range(n)]
+    diam = [1.5 + 2.5 * math.sin(math.pi * (i / (n - 1))) for i in range(n)]
+    forces = [round(min(1.0, max(0.05, d / 4.0)), 4) for d in diam]
+    add(
+        _curve_points(xy, forces, altitude=1.05, azimuth=0.48),
+        [(round(d, 3), round(d, 3)) for d in diam],
+        tool="fountain",
+        layer="ink",
+        color="#862E9CFF",
+        transform=(1.5, 0.0, 0.0, 1.5, 20.0, 60.0),
+    )
+
+    # 8. Ein Punkt (8 Byte `sizes`, Padding `=`) und 9. zwei Punkte (16 Byte, Padding `==`)
+    add(
+        _curve_points([(100.0, 560.0)], [0.7], altitude=1.1, azimuth=0.5),
+        [(3.2, 3.2)],
+        tool="fountain",
+        layer="ink",
+        color="#0F355CFF",
+    )
+    add(
+        _curve_points([(140.0, 560.0), (152.0, 563.0)], [0.4, 0.5], altitude=1.1, azimuth=0.5),
+        [(2.0, 2.0), (3.5, 3.0)],
+        tool="pen",
+        layer="ink",
+        color="#1E2A44FF",
+    )
+    return strokes
+
+
 def write_formatted_json(path: Path, strokes: list[dict]) -> None:
     """Schreibt eine Strich-Liste exakt im Prettier-JSON-Format (kompakte Arrays für transform und bbox)."""
     obj_strings: list[str] = []
@@ -796,7 +972,8 @@ def write_formatted_json(path: Path, strokes: list[dict]) -> None:
             f'    "t_end_ms": {json.dumps(s["t_end_ms"])},',
             f'    "transform": {tf_str},',
             f'    "bbox": {bb_str},',
-            f'    "points": {json.dumps(s["points"])}',
+            f'    "points": {json.dumps(s["points"])}' + ("," if "sizes" in s else ""),
+            *([f'    "sizes": {json.dumps(s["sizes"])}'] if "sizes" in s else []),
             "  }",
         ]
         obj_strings.append("\n".join(lines))
@@ -815,6 +992,8 @@ def main() -> int:
         ("05-lasso-transform.json", build_case_05(rng)),
         ("06-randfaelle.json", build_case_06(rng)),
         ("07-notizseite-200-striche.json", build_case_07(rng)),
+        # Fall 8 zuletzt: Er verbraucht Zufallszahlen erst nach 01 bis 07, deren Dateien darum byte-gleich bleiben
+        ("08-fueller-sizes.json", build_case_08(rng)),
     ]
 
     for filename, strokes in cases:

@@ -92,6 +92,13 @@
       "when": 1794571851283,
       "tag": "0012_cards",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1794932217272,
+      "tag": "0013_strichformat_v2",
+      "breakpoints": true
     }
   ]
 }

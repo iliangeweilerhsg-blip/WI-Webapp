@@ -42,9 +42,14 @@ export interface InkHandlerDeps {
   dataDir: string;
 }
 
-/** Ein Strich ist höchstens so groß wie eine Nachricht (1 MB, VERTRAEGE §11) abzüglich Umschlag, Base64 eingerechnet */
+/**
+ * `points` und `sizes` zusammen sind höchstens so groß wie eine Nachricht (1 MB, VERTRAEGE §11) abzüglich Umschlag,
+ * Base64 eingerechnet (VERTRAEGE §23.3). Roh, vor Base64: 750 000 Byte sind 1 000 000 Zeichen.
+ */
 export const MAX_STROKE_POINT_BYTES = 750_000;
 const POINT_BYTES = 24;
+/** `sizes` (Format v2, VERTRAEGE §23.2): je Punkt `width` und `height` als Float32 */
+const SIZE_BYTES = 8;
 
 const notebookStreamPrefix = 'notebook:';
 
@@ -91,6 +96,35 @@ export function decodeStrokePoints(points: string): Buffer {
   return bytes;
 }
 
+/**
+ * Prüft `sizes` (VERTRAEGE §23.2, §23.6) gegen die Punktzahl: Base64 und nicht leer, genau 8 Byte je Punkt,
+ * jeder Wert endlich und ≥ 0, nicht lauter Nullen, `points` und `sizes` zusammen höchstens `MAX_STROKE_POINT_BYTES`.
+ * Liefert die rohen Bytes.
+ */
+export function decodeStrokeSizes(sizes: string, points: Buffer): Buffer {
+  if (sizes.length === 0 || sizes.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(sizes)) {
+    throw messageInvalid('sizes ist kein gültiges Base64');
+  }
+  const bytes = Buffer.from(sizes, 'base64');
+  if (bytes.length === 0 || bytes.length !== (points.length / POINT_BYTES) * SIZE_BYTES) {
+    throw messageInvalid('sizes braucht genau 8 Byte je Punkt von points');
+  }
+  if (points.length + bytes.length > MAX_STROKE_POINT_BYTES) {
+    throw messageInvalid('points und sizes zusammen sind zu groß');
+  }
+  let positive = false;
+  for (let offset = 0; offset < bytes.length; offset += 4) {
+    const value = bytes.readFloatLE(offset);
+    // NaN besteht den Vergleich nicht, Unendlich der Endlichkeitsprüfung
+    if (!Number.isFinite(value) || !(value >= 0)) {
+      throw messageInvalid('sizes enthält NaN, Unendlich oder negative Werte');
+    }
+    if (value > 0) positive = true;
+  }
+  if (!positive) throw messageInvalid('sizes besteht nur aus Nullen');
+  return bytes;
+}
+
 /** Größter Betrag, den eine `real`-Spalte (float4) aufnimmt. Größere Werte wären ein DB-Fehler (`internal_error`) */
 export const FLOAT4_MAX = 3.4e38;
 const INT4_MAX = 2_147_483_647;
@@ -99,14 +133,25 @@ const INT4_MAX = 2_147_483_647;
 const float4 = (v: number) => Number.isFinite(v) && Math.abs(v) <= FLOAT4_MAX;
 const int4 = (v: number) => Number.isInteger(v) && Math.abs(v) <= INT4_MAX;
 
-function checkStroke(s: Stroke): Buffer {
+/** Geprüfte Bytes eines Strichs: `points` immer, `sizes` nur im Format v2 */
+interface CheckedStroke {
+  points: Buffer;
+  sizes: Buffer | null;
+}
+
+function checkStroke(s: Stroke): CheckedStroke {
   const allFloat4 = (values: readonly number[]) => values.every(float4);
   if (s.transform.length !== 6 || !allFloat4(s.transform))
     throw messageInvalid('transform braucht 6 endliche Zahlen im float4-Bereich');
   if (s.bbox.length !== 4 || !allFloat4(s.bbox))
     throw messageInvalid('bbox braucht 4 endliche Zahlen im float4-Bereich');
   if (!float4(s.width) || s.width <= 0) throw messageInvalid('width muss größer als 0 sein (float4)');
-  return decodeStrokePoints(s.points);
+  const points = decodeStrokePoints(s.points);
+  // Fehlt `sizes`, ist es ein Strich im Format v1. `null` ist laut Schema nie erlaubt, ein Wert wird nie ausgelassen
+  if (s.sizes !== undefined && typeof s.sizes !== 'string')
+    throw messageInvalid('sizes muss ein String sein');
+  const sizes = s.sizes === undefined ? null : decodeStrokeSizes(s.sizes, points);
+  return { points, sizes };
 }
 
 // ---------- notebook / page ----------
@@ -226,7 +271,7 @@ async function pageDelete(tx: Tx, op: OpOf<'page.delete'>): Promise<void> {
 
 async function strokeAdd(tx: Tx, op: OpOf<'stroke.add'>): Promise<void> {
   const s = op.data.stroke;
-  const points = checkStroke(s);
+  const { points, sizes } = checkStroke(s);
   const parent = await lockPageForStream(tx, op, op.data.page_id);
   const values = {
     tool: s.tool,
@@ -238,6 +283,9 @@ async function strokeAdd(tx: Tx, op: OpOf<'stroke.add'>): Promise<void> {
     transform: s.transform,
     bbox: s.bbox,
     points,
+    // Upsert ersetzt den ganzen Strich: Ohne `sizes` in der Operation wird die Spalte NULL. Drizzle lässt im `set`
+    // einen Schlüssel mit `undefined` aus und die Spalte behielte den alten Wert, darum ausdrücklich `null`
+    sizes,
     clockUncertain: op.clock_uncertain,
     createdAt: new Date(s.created_at),
     // Upsert belebt einen gelöschten Strich wieder. In einer gelöschten Seite übernimmt er deren Löschzeitpunkt

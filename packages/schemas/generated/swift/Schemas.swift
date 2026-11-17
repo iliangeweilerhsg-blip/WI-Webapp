@@ -16350,6 +16350,8 @@ extension PageStrokes {
 /// Neutrales Strich-Format (08 §4.1/4.2). points sind Rohkoordinaten VOR transform, bbox
 /// gilt NACH transform inklusive halber Breite. dt des ersten Punkts ist 0; t_end_ms −
 /// t_start_ms entspricht dem letzten dt. t_start_ms/t_end_ms null außerhalb einer Session.
+/// Optional sizes: Breite und Höhe je Punkt (Format v2, VERTRAEGE §23); fehlt es, ist der
+/// Strich im Format v1.
 // MARK: - Stroke
 struct Stroke: Codable {
     let bbox: [Double]
@@ -16359,8 +16361,16 @@ struct Stroke: Codable {
     let layer: StrokeLayer
     /// Base64 (ohne Zeilenumbrüche) von n ≥ 1 Punkten à 24 Byte: x, y, dt, force, azimuth,
     /// altitude als Float32 little-endian (08 §4.2). 24 Byte = genau 32 Base64-Zeichen, daher
-    /// nie Padding
+    /// nie Padding. Die Breite je Punkt steht in sizes (Format v2, VERTRAEGE §23), points bleibt
+    /// dafür unverändert
     let points: String
+    /// Optional (Format v2, VERTRAEGE §23.2): Breite und Höhe je Punkt als Base64 (ohne
+    /// Zeilenumbrüche), je Punkt zwei Float32 little-endian (width, height) in pt, vor
+    /// transform, also 8 Byte je Punkt. Der i-te Eintrag gehört zum i-ten Punkt in points, die
+    /// Anzahl ist gleich. Werte endlich und ≥ 0, mindestens einer > 0. Padding (=) ist erlaubt,
+    /// wo Base64 es verlangt. Fehlt das Feld, ist der Strich im Format v1. Nie null. Ob sizes
+    /// zur Punktzahl passt, prüfen Core und Web, nicht das Schema
+    let sizes: String?
     let tEndMS: Int?
     let tStartMS: Int?
     let tool: StrokeTool
@@ -16375,6 +16385,7 @@ struct Stroke: Codable {
         case createdAt = "created_at"
         case layer = "layer"
         case points = "points"
+        case sizes = "sizes"
         case tEndMS = "t_end_ms"
         case tStartMS = "t_start_ms"
         case tool = "tool"
@@ -16408,6 +16419,7 @@ extension Stroke {
         createdAt: Int? = nil,
         layer: StrokeLayer? = nil,
         points: String? = nil,
+        sizes: String?? = nil,
         tEndMS: Int?? = nil,
         tStartMS: Int?? = nil,
         tool: StrokeTool? = nil,
@@ -16421,6 +16433,7 @@ extension Stroke {
             createdAt: createdAt ?? self.createdAt,
             layer: layer ?? self.layer,
             points: points ?? self.points,
+            sizes: sizes ?? self.sizes,
             tEndMS: tEndMS ?? self.tEndMS,
             tStartMS: tStartMS ?? self.tStartMS,
             tool: tool ?? self.tool,
@@ -24141,6 +24154,9 @@ extension SyncResume {
 struct SyncServerMessage: Codable {
     let dbEpoch: String?
     let deviceID: String?
+    /// Optional: Fähigkeiten des Core (VERTRAEGE §23.4). Fehlt das Feld, gilt es als leer.
+    /// Bekannt: stroke_sizes (Core nimmt Stroke.sizes an). Clients ignorieren unbekannte Einträge
+    let features: [String]?
     let syncServerMessageProtocol: Double?
     let resume: [SyncResume]?
     let serverTime: Int?
@@ -24173,6 +24189,7 @@ struct SyncServerMessage: Codable {
     enum CodingKeys: String, CodingKey {
         case dbEpoch = "db_epoch"
         case deviceID = "device_id"
+        case features = "features"
         case syncServerMessageProtocol = "protocol"
         case resume = "resume"
         case serverTime = "server_time"
@@ -24218,6 +24235,7 @@ extension SyncServerMessage {
     func with(
         dbEpoch: String?? = nil,
         deviceID: String?? = nil,
+        features: [String]?? = nil,
         syncServerMessageProtocol: Double?? = nil,
         resume: [SyncResume]?? = nil,
         serverTime: Int?? = nil,
@@ -24243,6 +24261,7 @@ extension SyncServerMessage {
         return SyncServerMessage(
             dbEpoch: dbEpoch ?? self.dbEpoch,
             deviceID: deviceID ?? self.deviceID,
+            features: features ?? self.features,
             syncServerMessageProtocol: syncServerMessageProtocol ?? self.syncServerMessageProtocol,
             resume: resume ?? self.resume,
             serverTime: serverTime ?? self.serverTime,
@@ -25051,6 +25070,9 @@ enum SyncUnsubscribeType: String, Codable {
 struct SyncWelcome: Codable {
     let dbEpoch: String
     let deviceID: String?
+    /// Optional: Fähigkeiten des Core (VERTRAEGE §23.4). Fehlt das Feld, gilt es als leer.
+    /// Bekannt: stroke_sizes (Core nimmt Stroke.sizes an). Clients ignorieren unbekannte Einträge
+    let features: [String]?
     let syncWelcomeProtocol: Double
     let resume: [SyncResume]
     let serverTime: Int
@@ -25060,6 +25082,7 @@ struct SyncWelcome: Codable {
     enum CodingKeys: String, CodingKey {
         case dbEpoch = "db_epoch"
         case deviceID = "device_id"
+        case features = "features"
         case syncWelcomeProtocol = "protocol"
         case resume = "resume"
         case serverTime = "server_time"
@@ -25089,6 +25112,7 @@ extension SyncWelcome {
     func with(
         dbEpoch: String? = nil,
         deviceID: String?? = nil,
+        features: [String]?? = nil,
         syncWelcomeProtocol: Double? = nil,
         resume: [SyncResume]? = nil,
         serverTime: Int? = nil,
@@ -25098,6 +25122,7 @@ extension SyncWelcome {
         return SyncWelcome(
             dbEpoch: dbEpoch ?? self.dbEpoch,
             deviceID: deviceID ?? self.deviceID,
+            features: features ?? self.features,
             syncWelcomeProtocol: syncWelcomeProtocol ?? self.syncWelcomeProtocol,
             resume: resume ?? self.resume,
             serverTime: serverTime ?? self.serverTime,
@@ -28885,6 +28910,7 @@ extension Stroke {
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(layer, forKey: .layer)
         try container.encode(points, forKey: .points)
+        try container.encodeIfPresent(sizes, forKey: .sizes)
         try container.encode(tEndMS, forKey: .tEndMS)
         try container.encode(tStartMS, forKey: .tStartMS)
         try container.encode(tool, forKey: .tool)
@@ -30124,6 +30150,7 @@ extension SyncWelcome {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(dbEpoch, forKey: .dbEpoch)
         try container.encode(deviceID, forKey: .deviceID)
+        try container.encodeIfPresent(features, forKey: .features)
         try container.encode(syncWelcomeProtocol, forKey: .syncWelcomeProtocol)
         try container.encode(resume, forKey: .resume)
         try container.encode(serverTime, forKey: .serverTime)

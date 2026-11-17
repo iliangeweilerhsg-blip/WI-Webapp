@@ -1,0 +1,25 @@
+{
+  "type": "op",
+  "op_id": "019a4e14-0000-7000-8000-000000000905",
+  "stream": "notebook:019a4e14-0000-7000-8000-000000000050",
+  "kind": "stroke.add",
+  "at": 1762240562123,
+  "clock_uncertain": false,
+  "data": {
+    "page_id": "019a4e14-0000-7000-8000-000000000051",
+    "stroke": {
+      "client_id": "019a4e14-d001-7a10-8c11-2b5f0e6a7d31",
+      "tool": "fountain",
+      "layer": "ink",
+      "color": "#0F355CFF",
+      "width": 3.6,
+      "created_at": 1762246580000,
+      "t_start_ms": 380000,
+      "t_end_ms": 380016,
+      "transform": [1, 0, 0, 1, 0, 0],
+      "bbox": [98.2, 198.2, 24.6, 8.6],
+      "points": "AADIQgAASEMAAAAAmpmZPgAAAD8AAIA/AADcQgAAS0MAAABBmpkZPwAAAD8AAIA/AADyQgAATUMAAIBBzczMPgAAAD8AAIA/",
+      "sizes": "AAAAQAAAAEAAAJBAAABAQAAAQEAAAEBA"
+    }
+  }
+}

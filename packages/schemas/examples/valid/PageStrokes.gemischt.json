@@ -1,0 +1,34 @@
+{
+  "page_id": "019a4e14-0000-7000-8000-000000000051",
+  "stream_seq": 1835,
+  "stream_op_id": "019a4e14-0000-7000-8000-000000001835",
+  "strokes": [
+    {
+      "client_id": "019a4e14-d001-7a10-8c11-2b5f0e6a7d31",
+      "tool": "fountain",
+      "layer": "ink",
+      "color": "#0F355CFF",
+      "width": 3.6,
+      "created_at": 1762246580000,
+      "t_start_ms": 380000,
+      "t_end_ms": 380016,
+      "transform": [1, 0, 0, 1, 0, 0],
+      "bbox": [98.2, 198.2, 24.6, 8.6],
+      "points": "AADIQgAASEMAAAAAmpmZPgAAAD8AAIA/AADcQgAAS0MAAABBmpkZPwAAAD8AAIA/AADyQgAATUMAAIBBzczMPgAAAD8AAIA/",
+      "sizes": "AAAAQAAAAEAAAJBAAABAQAAAQEAAAEBA"
+    },
+    {
+      "client_id": "019a4e14-c58c-77cb-8cbc-9997fe9e949d",
+      "tool": "pen",
+      "layer": "ink",
+      "color": "#1E2A44FF",
+      "width": 2.4,
+      "created_at": 1762246575500,
+      "t_start_ms": 375500,
+      "t_end_ms": 375516,
+      "transform": [1, 0, 0, 1, 0, 0],
+      "bbox": [118.8, 88.8, 67.4, 2.4],
+      "points": "AADwQgAAtEIAAAAAZmbmPs3MzD4zM5M/AAA5QwAAtEIAAIBBMzMzP83MzD4zM5M/"
+    }
+  ]
+}

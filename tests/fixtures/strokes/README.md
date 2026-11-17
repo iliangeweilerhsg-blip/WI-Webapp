@@ -22,8 +22,9 @@ Jede Datei `NN-name.json` enthält ein JSON-Array der Striche einer A4-Hochforma
   4. `force` (`0.0` bis `1.0`, normierter Stiftdruck)
   5. `azimuth` (`rad`, Richtungswinkel in `[-π, π]`)
   6. `altitude` (`rad`, Neigungswinkel zur Oberfläche in `[0, π/2]`, `0` = flach, `π/2` = senkrecht)
+- **`sizes`** (optional, Format v2, [`docs/VERTRAEGE.md`](../../../docs/VERTRAEGE.md) §23): Base64-kodierter Binärpuffer mit der Größe je Punkt. Pro Punkt genau **8 Byte** (`2 × Float32` little-endian, `struct`-Format `<2f`): `width`, `height` (`pt`, vor `transform`). Der i-te Eintrag gehört zum i-ten Punkt in `points`. Werte endlich und `≥ 0`, mindestens ein Wert `> 0`. Padding (`=`) ist erlaubt, wo Base64 es verlangt. Fehlt das Feld, ist der Strich im Format v1. `width` ist bei v2 der Median von `max(width, height)` der Punkte. Die Dateien 01 bis 07 enthalten kein `sizes` und bleiben byte-gleich.
 
-## Übersicht der 7 Testfälle
+## Übersicht der 8 Testfälle
 
 | Fall | JSON-Datei | SVG-Vorschau | Beschreibung |
 | :--- | :--- | :--- | :--- |
@@ -34,6 +35,7 @@ Jede Datei `NN-name.json` enthält ein JSON-Array der Striche einer A4-Hochforma
 | **5** | `05-lasso-transform.json` | [`vorschau/05-lasso-transform.svg`](vorschau/05-lasso-transform.svg) | Direkter Vergleich vor/nach einer Lasso-Verschiebung: Strich 1 am Ursprungsort (`transform: [1, 0, 0, 1, 0, 0]`), Strich 2 mit identischen Rohpunkten in `points`, aber `transform: [1, 0, 0, 1, 50, 20]` (um `+50 pt` nach rechts und `+20 pt` nach unten verschoben) und entsprechend verschobener `bbox`. |
 | **6** | `06-randfaelle.json` | [`vorschau/06-randfaelle.svg`](vorschau/06-randfaelle.svg) | Fünf technische Randfälle in einer Datei: (1) 1-Punkt-Tipp, (2) 2-Punkte-Kurzstrich, (3) sehr langer Strich mit exakt `1 000` Punkten, (4) Strich mit den Extremwerten `force = 0.0` und `force = 1.0`, (5) Strich außerhalb einer Session (`t_start_ms: null`, `t_end_ms: null`). |
 | **7** | `07-notizseite-200-striche.json` | [`vorschau/07-notizseite-200-striche.svg`](vorschau/07-notizseite-200-striche.svg) | Ganze A4-Vorlesungsnotizseite mit `231` Strichen (`19 801` Punkte) aus 10 Handschrift-Zeilen (`pen`, `fountain`, `pencil`) und `3` Textmarker-Hervorhebungen (`marker`, `layer: "highlight"`) mit streng fortlaufenden Zeitstempeln. |
+| **8** | `08-fueller-sizes.json` | [`vorschau/08-fueller-sizes.svg`](vorschau/08-fueller-sizes.svg) | Format v2 mit `sizes` (9 Striche, 373 Punkte): `fountain` mit deutlichem Verlauf (Durchmesser 1,2 bis 5,5 pt), `fountain` mit schräger Spitze (`width ≠ height`), `pen`, `pencil`, `marker` (`layer: "highlight"`), `fountain` mit Größe `0` am Ende, `fountain` mit skalierender `transform` (`1,5`-fach), dazu ein Strich mit 1 Punkt (Padding `=`) und einer mit 2 Punkten (Padding `==`). |
 
 ## Befehle
 
@@ -43,7 +45,7 @@ Alle Skripte nutzen **ausschließlich die Python-3-Standardbibliothek** (`struct
 # 1. Testdaten deterministisch neu erzeugen (fester Seed)
 python3 tests/fixtures/strokes/erzeugen.py
 
-# 2. Alle 7 JSON-Dateien gegen Schema, Wertebereiche, Bounding-Box und Float32-Roundtrip prüfen
+# 2. Alle 8 JSON-Dateien gegen Schema, Wertebereiche, Bounding-Box und Float32-Roundtrip prüfen
 python3 tests/fixtures/strokes/pruefen.py
 
 # 3. SVG-Vorschauen in tests/fixtures/strokes/vorschau/ neu generieren

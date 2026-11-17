@@ -108,3 +108,19 @@ export function notebookCreateData(moduleId: string, overrides: Record<string, u
     ...overrides,
   };
 }
+
+/** `sizes` (Format v2, VERTRAEGE §23.2): je Punkt `width`, `height` als Float32 little-endian, Base64 */
+export function packSizes(sizes: readonly (readonly [number, number])[]): string {
+  const buf = Buffer.alloc(sizes.length * 8);
+  sizes.forEach(([w, h], i) => {
+    buf.writeFloatLE(w, i * 8);
+    buf.writeFloatLE(h, i * 8 + 4);
+  });
+  return buf.toString('base64');
+}
+
+/** `points` aus `n` Punkten, alle Werte 0 (endlich, damit gültig) */
+export const zeroPoints = (n: number): string => Buffer.alloc(n * 24).toString('base64');
+
+/** Anzahl der Punkte eines Strichs aus `points` */
+export const pointCount = (s: { points: string }): number => Buffer.from(s.points, 'base64').length / 24;
