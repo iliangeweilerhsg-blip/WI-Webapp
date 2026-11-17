@@ -250,6 +250,29 @@ export type ConceptRelationSource = ("ki" | "manuell" | "wikilink")
  */
 export type DashboardLayout = ("standard" | "folie_gross" | "notizen_gross" | "fokus")
 /**
+ * Warum der Foliensatz einer Session nicht gesetzt oder gewechselt werden kann (§22.4): abgeschlossen = Session beendet/verarbeitet/verpasst, folienwechsel = Satz vorhanden und schon slide_event
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "DeckLock".
+ */
+export type DeckLock = ("folienwechsel" | "abgeschlossen")
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "IngestState".
+ */
+export type IngestState = ("neu" | "verarbeitet" | "fehler")
+/**
+ * ISO 8601, UTC
+ */
+export type Timestamp1 = string
+/**
+ * Herkunft eines wählbaren Foliensatzes (VERTRAEGE §22.3): moodle = mindestens eine Moodle-Datei zeigt auf den Satz
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "DeckSource".
+ */
+export type DeckSource = ("moodle" | "upload")
+/**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "DeviceKind".
  */
@@ -319,11 +342,6 @@ export type MarkerKind = ("frage" | "klausur" | "verknuepfung")
  * via the `definition` "EmbedderState".
  */
 export type EmbedderState = ("bereit" | "laedt" | "nicht_verfuegbar")
-/**
- * This interface was referenced by `SchemaBundle`'s JSON-Schema
- * via the `definition` "IngestState".
- */
-export type IngestState = ("neu" | "verarbeitet" | "fehler")
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "Lang".
@@ -723,11 +741,11 @@ export type SyncServerMessage = (SyncWelcome | SyncSubscribed | SyncAck | SyncOp
 /**
  * ISO 8601, UTC
  */
-export type Timestamp1 = string
+export type Timestamp2 = string
 /**
  * ISO 8601, UTC
  */
-export type Timestamp2 = string
+export type Timestamp3 = string
 /**
  * transkribiert: neu geschrieben. unveraendert: gleicher input_hash, übersprungen. ohne_audio: keine full.m4a (altes Transkript entfernt)
  * 
@@ -2034,6 +2052,73 @@ backup_encryption?: boolean
  * Ortszeit des Macs (Standard 03:00)
  */
 backup_time?: string
+}
+/**
+ * Ein wählbarer Foliensatz mit Verfügbarkeit (§22.3). used_by: SessionRef aus concepts.schema.json (gemeinsamer Namensraum aller Schema-Dateien)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "DeckOption".
+ */
+export interface DeckOption {
+deck: SlideDeck
+available_at: Timestamp1
+source: DeckSource
+/**
+ * Keine andere nicht gelöschte Session in geplant, bereit, laeuft, pausiert, beendet oder verarbeitet trägt den Satz
+ */
+free: boolean
+/**
+ * Andere Sessions, die den Satz tragen, neueste zuerst, höchstens 3 (nur zur Anzeige)
+ * 
+ * @maxItems 3
+ */
+used_by: SessionRef[]
+}
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SlideDeck".
+ */
+export interface SlideDeck {
+id: Uuid
+user_id: Uuid
+created_at: Timestamp
+updated_at: Timestamp
+deleted_at: (Timestamp | null)
+module_id: Uuid
+session_id: (Uuid | null)
+title: string
+sha256: string
+/**
+ * null bis pdf.ingest gelaufen ist
+ */
+page_count: (number | null)
+uploaded_at: Timestamp
+ingest_state: IngestState
+}
+/**
+ * GET /modules/{id}/deck-options?session_id (§22.3). Momentaufnahme, verbindlich prüft erst PATCH /sessions/{id}
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "DeckOptions".
+ */
+export interface DeckOptions {
+module_id: Uuid
+session_id: (Uuid | null)
+/**
+ * Nicht gelöschter Satz der Session, sonst null (auch ohne session_id)
+ */
+current_deck_id: (Uuid | null)
+/**
+ * Erster freier Satz in der Reihenfolge von items, sonst null. Null, wenn die Session schon einen Satz hat oder abgeschlossen ist
+ */
+suggested_deck_id: (Uuid | null)
+lock: (DeckLock | null)
+/**
+ * Wählbare Sätze, available_at absteigend, dann id absteigend, höchstens 50. Der aktuelle Satz ist immer dabei, auch jenseits der 50 (dann 51 Einträge)
+ * 
+ * @maxItems 51
+ */
+items: DeckOption[]
 }
 /**
  * Gekoppeltes Gerät. Das Token selbst gibt die API nie aus (gespeichert nur token_hash).
@@ -5596,27 +5681,6 @@ origin?: SyncOrigin
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
- * via the `definition` "SlideDeck".
- */
-export interface SlideDeck {
-id: Uuid
-user_id: Uuid
-created_at: Timestamp
-updated_at: Timestamp
-deleted_at: (Timestamp | null)
-module_id: Uuid
-session_id: (Uuid | null)
-title: string
-sha256: string
-/**
- * null bis pdf.ingest gelaufen ist
- */
-page_count: (number | null)
-uploaded_at: Timestamp
-ingest_state: IngestState
-}
-/**
- * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "SlideDeckDetail".
  */
 export interface SlideDeckDetail {
@@ -6015,7 +6079,7 @@ percent: (number | null)
  * true = der Mac hängt am Netzteil (auch wenn er gerade nicht lädt), false = Akkubetrieb, null = unbekannt oder kein Akku
  */
 on_ac: (boolean | null)
-measured_at: Timestamp1
+measured_at: Timestamp2
 }
 /**
  * GET /system/storage (UX-11, VERTRAEGE §7.6): freier Platz auf dem Datenträger des Datenordners und Größe der Daten. Größen sind Dateigrößen in Byte (keine Plattenblöcke)
@@ -6044,7 +6108,7 @@ vault_bytes?: number
  * Größe der Datenbank (`pg_database_size`), zählt nicht zu `data_dir_size_bytes`. Fehlt, wenn die Abfrage scheitert
  */
 db_bytes?: number
-measured_at: Timestamp2
+measured_at: Timestamp3
 }
 /**
  * Teilaufgabe eines Übungsblatts. Zerlegung erst ab Phase 2 (F-ORG-03).

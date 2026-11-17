@@ -498,6 +498,24 @@ class DataSettingsUpdate(BaseModel):
     )
 
 
+class DeckLock(StrEnum):
+    """
+    Warum der Foliensatz einer Session nicht gesetzt oder gewechselt werden kann (§22.4): abgeschlossen = Session beendet/verarbeitet/verpasst, folienwechsel = Satz vorhanden und schon slide_event
+    """
+
+    folienwechsel = 'folienwechsel'
+    abgeschlossen = 'abgeschlossen'
+
+
+class DeckSource(StrEnum):
+    """
+    Herkunft eines wählbaren Foliensatzes (VERTRAEGE §22.3): moodle = mindestens eine Moodle-Datei zeigt auf den Satz
+    """
+
+    moodle = 'moodle'
+    upload = 'upload'
+
+
 class DeviceKind(StrEnum):
     ipad = 'ipad'
     iphone = 'iphone'
@@ -6624,6 +6642,63 @@ class CostSummary(BaseModel):
     by_model: list[CostByModel]
 
 
+class DeckOption(BaseModel):
+    """
+    Ein wählbarer Foliensatz mit Verfügbarkeit (§22.3). used_by: SessionRef aus concepts.schema.json (gemeinsamer Namensraum aller Schema-Dateien)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    deck: SlideDeck
+    available_at: AwareDatetime = Field(
+        ...,
+        description='Größtes moodle_item.timemodified der Moodle-Dateien des Satzes, sonst slide_deck.uploaded_at',
+        title='Timestamp',
+    )
+    source: DeckSource
+    free: StrictBool = Field(
+        ...,
+        description='Keine andere nicht gelöschte Session in geplant, bereit, laeuft, pausiert, beendet oder verarbeitet trägt den Satz',
+    )
+    used_by: list[SessionRef] = Field(
+        ...,
+        description='Andere Sessions, die den Satz tragen, neueste zuerst, höchstens 3 (nur zur Anzeige)',
+        max_length=3,
+    )
+
+
+class DeckOptions(BaseModel):
+    """
+    GET /modules/{id}/deck-options?session_id (§22.3). Momentaufnahme, verbindlich prüft erst PATCH /sessions/{id}
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    module_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    session_id: Uuid | None
+    current_deck_id: Uuid | None = Field(
+        ...,
+        description='Nicht gelöschter Satz der Session, sonst null (auch ohne session_id)',
+    )
+    suggested_deck_id: Uuid | None = Field(
+        ...,
+        description='Erster freier Satz in der Reihenfolge von items, sonst null. Null, wenn die Session schon einen Satz hat oder abgeschlossen ist',
+    )
+    lock: DeckLock | None
+    items: list[DeckOption] = Field(
+        ...,
+        description='Wählbare Sätze, available_at absteigend, dann id absteigend, höchstens 50. Der aktuelle Satz ist immer dabei, auch jenseits der 50 (dann 51 Einträge)',
+        max_length=51,
+    )
+
+
 class DrawingSnapshotData(BaseModel):
     """
     Datei vorher per PUT /pages/{id}/pkdrawing hochgeladen, nur fürs iPad
@@ -8429,6 +8504,10 @@ class SchemaBundle(BaseModel):
     DataSettingsUpdate_1: DataSettingsUpdate | None = Field(
         None, alias='DataSettingsUpdate'
     )
+    DeckLock_1: DeckLock | None = Field(None, alias='DeckLock')
+    DeckOption_1: DeckOption | None = Field(None, alias='DeckOption')
+    DeckOptions_1: DeckOptions | None = Field(None, alias='DeckOptions')
+    DeckSource_1: DeckSource | None = Field(None, alias='DeckSource')
     Device_1: Device | None = Field(None, alias='Device')
     DeviceKind_1: DeviceKind | None = Field(None, alias='DeviceKind')
     DeviceList_1: DeviceList | None = Field(None, alias='DeviceList')

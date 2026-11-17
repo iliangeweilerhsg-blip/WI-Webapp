@@ -266,6 +266,18 @@
     "DataSettingsUpdate": {
       "$ref": "#/$defs/DataSettingsUpdate"
     },
+    "DeckLock": {
+      "$ref": "#/$defs/DeckLock"
+    },
+    "DeckOption": {
+      "$ref": "#/$defs/DeckOption"
+    },
+    "DeckOptions": {
+      "$ref": "#/$defs/DeckOptions"
+    },
+    "DeckSource": {
+      "$ref": "#/$defs/DeckSource"
+    },
     "Device": {
       "$ref": "#/$defs/Device"
     },
@@ -4009,6 +4021,130 @@
           "description": "Ortszeit des Macs (Standard 03:00)"
         }
       }
+    },
+    "DeckLock": {
+      "title": "DeckLock",
+      "type": "string",
+      "enum": [
+        "folienwechsel",
+        "abgeschlossen"
+      ],
+      "description": "Warum der Foliensatz einer Session nicht gesetzt oder gewechselt werden kann (§22.4): abgeschlossen = Session beendet/verarbeitet/verpasst, folienwechsel = Satz vorhanden und schon slide_event"
+    },
+    "DeckOption": {
+      "title": "DeckOption",
+      "type": "object",
+      "description": "Ein wählbarer Foliensatz mit Verfügbarkeit (§22.3). used_by: SessionRef aus concepts.schema.json (gemeinsamer Namensraum aller Schema-Dateien)",
+      "required": [
+        "deck",
+        "available_at",
+        "source",
+        "free",
+        "used_by"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "deck": {
+          "$ref": "#/$defs/SlideDeck"
+        },
+        "available_at": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Größtes moodle_item.timemodified der Moodle-Dateien des Satzes, sonst slide_deck.uploaded_at"
+        },
+        "source": {
+          "$ref": "#/$defs/DeckSource"
+        },
+        "free": {
+          "type": "boolean",
+          "description": "Keine andere nicht gelöschte Session in geplant, bereit, laeuft, pausiert, beendet oder verarbeitet trägt den Satz"
+        },
+        "used_by": {
+          "type": "array",
+          "maxItems": 3,
+          "description": "Andere Sessions, die den Satz tragen, neueste zuerst, höchstens 3 (nur zur Anzeige)",
+          "items": {
+            "$ref": "#/$defs/SessionRef"
+          }
+        }
+      }
+    },
+    "DeckOptions": {
+      "title": "DeckOptions",
+      "type": "object",
+      "description": "GET /modules/{id}/deck-options?session_id (§22.3). Momentaufnahme, verbindlich prüft erst PATCH /sessions/{id}",
+      "required": [
+        "module_id",
+        "session_id",
+        "current_deck_id",
+        "suggested_deck_id",
+        "lock",
+        "items"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "current_deck_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Nicht gelöschter Satz der Session, sonst null (auch ohne session_id)"
+        },
+        "suggested_deck_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Erster freier Satz in der Reihenfolge von items, sonst null. Null, wenn die Session schon einen Satz hat oder abgeschlossen ist"
+        },
+        "lock": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeckLock"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 51,
+          "description": "Wählbare Sätze, available_at absteigend, dann id absteigend, höchstens 50. Der aktuelle Satz ist immer dabei, auch jenseits der 50 (dann 51 Einträge)",
+          "items": {
+            "$ref": "#/$defs/DeckOption"
+          }
+        }
+      }
+    },
+    "DeckSource": {
+      "title": "DeckSource",
+      "type": "string",
+      "enum": [
+        "moodle",
+        "upload"
+      ],
+      "description": "Herkunft eines wählbaren Foliensatzes (VERTRAEGE §22.3): moodle = mindestens eine Moodle-Datei zeigt auf den Satz"
     },
     "Device": {
       "title": "Device",
