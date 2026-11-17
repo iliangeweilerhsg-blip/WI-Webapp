@@ -34,10 +34,20 @@ export interface NoDeckPanelProps {
   /** `session.started_at` in ms; entscheidet zwischen „Neue Folien aus Moodle“ und „Vorschlag“ */
   startedAt: number | null;
   options: DeckOptions | undefined;
+  /** Das Laden der Optionen ist gescheitert (nur für den ruhigen Hinweis bei „Folien wählen“) */
+  optionsFailed?: boolean;
   choice: DeckChoice;
 }
 
-export function NoDeckPanel({ sessionId, deleted, active, startedAt, options, choice }: NoDeckPanelProps) {
+export function NoDeckPanel({
+  sessionId,
+  deleted,
+  active,
+  startedAt,
+  options,
+  optionsFailed = false,
+  choice,
+}: NoDeckPanelProps) {
   const [picking, setPicking] = useState(false);
   const [dismissed, setDismissed] = useState<string | null>(null);
   const toggle = useReturnFocus(picking);
@@ -144,6 +154,12 @@ export function NoDeckPanel({ sessionId, deleted, active, startedAt, options, ch
             onClose={() => setPicking(false)}
           />
         </div>
+      ) : null}
+
+      {editable && picking && !options ? (
+        <p role="status" className="text-sm text-text-muted">
+          {optionsFailed ? 'Die Foliensätze sind gerade nicht erreichbar.' : 'Foliensätze werden geladen …'}
+        </p>
       ) : null}
 
       {choice.message ? (

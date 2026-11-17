@@ -111,8 +111,8 @@ function useSpontaneousStart(onSession?: (session: Session) => void) {
  * als Zeile unter dem Modul und geht als `slide_deck_id` in `POST /sessions` mit; „Ohne Folien“ ist ein Klick.
  * Keine Liste: Wer einen anderen Satz will, wählt ihn in der Live-Ansicht. Der Start wartet nie auf die Abfrage.
  */
-function useSpontaneousDeck(moduleId: string) {
-  const query = useDeckOptions(moduleId, null);
+function useSpontaneousDeck(moduleId: string, enabled = true) {
+  const query = useDeckOptions(moduleId, null, { enabled });
   const [none, setNone] = useState(false);
   useEffect(() => setNone(false), [moduleId]);
   const suggestedId = query.data?.suggested_deck_id ?? null;
@@ -240,9 +240,10 @@ function SpontaneousCardBody({ modules, selected, onChoose, start, busy, error }
 export function ModuleSessionButton({ moduleId }: { moduleId: string }) {
   const active = useActiveSession();
   const { start, busy, error } = useSpontaneousStart();
-  const deck = useSpontaneousDeck(moduleId);
-  if (active.isPending) return null;
   const running = active.data ?? null;
+  // Läuft schon eine Session, gibt es hier nichts zu starten und nichts abzufragen
+  const deck = useSpontaneousDeck(moduleId, !active.isPending && running === null);
+  if (active.isPending) return null;
 
   return (
     <div className="mt-4">

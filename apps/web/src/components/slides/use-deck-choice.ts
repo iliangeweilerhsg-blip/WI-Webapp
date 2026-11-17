@@ -5,7 +5,7 @@
 // die Optionen werden neu geladen (§22.7). Fehler stehen ruhig als Text, nie als Alarm.
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useRef, useState } from 'react';
-import type { Session } from '@sg/shared';
+import type { DeckOptions, Session } from '@sg/shared';
 import { ApiRequestError, friendlyMessage } from '../../lib/api.ts';
 import { deckOptionsKey } from '../../lib/material.ts';
 import { setSessionDeck } from '../../lib/sessions.ts';
@@ -47,7 +47,20 @@ export function useDeckChoice(
       setBusy(true);
       setMessage(null);
       try {
-        onSession(await setSessionDeck(sessionId, deckId));
+        const updated = await setSessionDeck(sessionId, deckId);
+        // Die Antwort gilt sofort in der Momentaufnahme; die Neuladung folgt nur noch für Liste und Sperre
+        if (moduleId !== null) {
+          client.setQueryData<DeckOptions>(deckOptionsKey(moduleId, sessionId), (old) =>
+            old
+              ? {
+                  ...old,
+                  current_deck_id: updated.slide_deck_id,
+                  suggested_deck_id: updated.slide_deck_id !== null ? null : old.suggested_deck_id,
+                }
+              : old,
+          );
+        }
+        onSession(updated);
         refresh();
         return true;
       } catch (cause) {
@@ -63,7 +76,7 @@ export function useDeckChoice(
         setBusy(false);
       }
     },
-    [sessionId, onSession, refresh, client],
+    [sessionId, moduleId, onSession, refresh, client],
   );
 
   const enqueue = uploads?.enqueue;

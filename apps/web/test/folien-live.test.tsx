@@ -334,6 +334,7 @@ describe('Live-Ansicht: Abfrage nach neuen Folien', () => {
       makeDeck({ id: D3, module_id: MODULE.id, title: 'VL 08 Sperren', ingest_state: 'verarbeitet' }),
     );
     core.slides[D3] = makeSlides(D3, 3);
+    core.sessions.find((x) => x.id === SESSION_ID)!.slide_deck_id = D3;
     rerender(
       <QueryClientProvider client={queryClient}>
         <SlidesPanel
@@ -429,6 +430,72 @@ describe('Live-Ansicht: gelöschter Satz', () => {
     expect(screen.queryByRole('button', { name: 'Folien wählen' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'PDF hochladen' })).toBeNull();
     expect(screen.queryByTestId('deck-offer')).toBeNull();
+  });
+});
+
+describe('Live-Ansicht: von außen gelöschter Satz', () => {
+  const hidden = () => vi.spyOn(document, 'visibilityState', 'get');
+
+  async function deleteExternally() {
+    core.decks.find((d) => d.id === D1)!.deleted_at = '2026-11-04T08:10:00Z';
+    const state = hidden();
+    state.mockReturnValue('hidden');
+    window.dispatchEvent(new Event('visibilitychange'));
+    state.mockReturnValue('visible');
+    await act(async () => void window.dispatchEvent(new Event('visibilitychange')));
+    return state;
+  }
+
+  it('erkennt ihn beim nächsten Sichtbarwerden über deck-options, ohne Neuladen und ohne 404 des Satzes', async () => {
+    core.sessions = [session({ slide_deck_id: D1 })];
+    open(session({ slide_deck_id: D1 }));
+    await screen.findByTestId('slide-counter');
+    // Nur eine leichte Abfrage, kein Dauerpolling mit Satz
+    await waitFor(() => expect(optionCalls()).toHaveLength(1));
+    const state = await deleteExternally();
+    expect(await screen.findByText('Die Folien dieser Vorlesung sind gelöscht.')).toBeInTheDocument();
+    expect(screen.queryByTestId('slide-counter')).toBeNull();
+    expect(optionCalls()).toHaveLength(2);
+    state.mockRestore();
+  });
+
+  it('die Pfeiltasten blättern im gelöschten Satz nicht weiter und senden kein slide.change', async () => {
+    core.sessions = [session({ slide_deck_id: D1 })];
+    const { sync } = open(session({ slide_deck_id: D1 }));
+    await screen.findByTestId('slide-counter');
+    const state = await deleteExternally();
+    await screen.findByText('Die Folien dieser Vorlesung sind gelöscht.');
+    const user = userEvent.setup();
+    await user.keyboard('{ArrowRight}{ArrowRight}{ArrowLeft} ');
+    expect(sync.send).not.toHaveBeenCalled();
+    state.mockRestore();
+  });
+});
+
+describe('Live-Ansicht: Optionen noch nicht da', () => {
+  it('„Folien wählen“ zeigt ruhig, dass die Foliensätze geladen werden', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal('fetch', (input: RequestInfo | URL) =>
+      String(input).includes('/deck-options')
+        ? new Promise<Response>(() => undefined)
+        : Promise.reject(new Error('x')),
+    );
+    open();
+    await user.click(await screen.findByRole('button', { name: 'Folien wählen' }));
+    expect(screen.getByText('Foliensätze werden geladen …')).toBeInTheDocument();
+  });
+
+  it('gescheiterte Optionen: ruhiger Hinweis statt eines stillen Knopfs', async () => {
+    const user = userEvent.setup();
+    const coreFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).includes('/deck-options')
+        ? Promise.resolve(new Response('{}', { status: 500 }))
+        : coreFetch(input, init),
+    );
+    open();
+    await user.click(await screen.findByRole('button', { name: 'Folien wählen' }));
+    expect(await screen.findByText('Die Foliensätze sind gerade nicht erreichbar.')).toBeInTheDocument();
   });
 });
 

@@ -6,7 +6,7 @@
 // Fremde Wechsel (iPad, anderer Tab) kommen über denselben Strom und aktualisieren die Anzeige.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { Session, Slide } from '@sg/shared';
+import type { DeckOptions, Session, Slide } from '@sg/shared';
 import { ApiRequestError } from '../../../lib/api.ts';
 import {
   deckOptionsKey,
@@ -90,25 +90,42 @@ export function SlidesPanel({
   const queryClient = useQueryClient();
   const deck = useDeckDetail(slideDeckId ?? '', { enabled: slideDeckId !== null });
   // Der Satz der Session ist gelöscht (der Zeiger bleibt, die Abfrage sagt 404): wie „kein Satz“ behandeln (§22.2)
-  const deleted =
+  const deckGone =
     slideDeckId !== null &&
     deck.isError &&
     deck.error instanceof ApiRequestError &&
     deck.error.status === 404;
-  const noDeck = slideDeckId === null || deleted;
-  // `deck-options` (§22.3, §22.6): ohne Satz zum Anbieten und Abfragen auf Moodle, mit Satz einmal für die Sperre
+  // Seit wann gilt dieser Zeiger? Eine Momentaufnahme der Optionen von davor sagt nichts über den neuen Satz.
+  const pointerSince = useRef({ id: slideDeckId, at: Date.now() });
+  if (pointerSince.current.id !== slideDeckId) pointerSince.current = { id: slideDeckId, at: Date.now() };
+  // `deck-options` (§22.3, §22.6): ohne Satz zum Anbieten und Abfragen auf Moodle, mit Satz für die Sperre und für den
+  // Fall, dass der Satz von außen gelöscht wird (dann sagt `current_deck_id = null` es, auch ohne Neuladen)
   const options = useDeckOptions(moduleId, sessionId, {
-    enabled: active || deleted,
-    refetchOnVisible: noDeck && active,
-    // Hat die Session einen Satz, fragt die Live-Ansicht nicht mehr (§22.6)
-    refetchInterval: () => (active && noDeck ? DECK_OFFER_POLL_MS : false),
+    enabled: active || deckGone,
+    // Bei jedem Sichtbarwerden des Tabs, mit und ohne Satz: eine leichte Abfrage, keine Dauerschleife
+    refetchOnVisible: active,
+    // Alle 60 s nur, solange es Folien anzubieten gibt: ohne Satz oder mit gelöschtem Satz (§22.6)
+    refetchInterval: (data) =>
+      active && (slideDeckId === null || deckGone || data?.current_deck_id === null)
+        ? DECK_OFFER_POLL_MS
+        : false,
   });
-  // Bekommt die Session von außen einen anderen Satz (`session.updated`), stimmt `lock` nicht mehr: neu laden
+  const optionsGone =
+    slideDeckId !== null &&
+    options.data !== undefined &&
+    options.data.current_deck_id === null &&
+    options.dataUpdatedAt >= pointerSince.current.at;
+  const deleted = deckGone || optionsGone;
+  const noDeck = slideDeckId === null || deleted;
+  // Bekommt die Session von außen einen anderen Satz (`session.updated`), stimmt `lock` nicht mehr: neu laden. Stimmt die
+  // Momentaufnahme schon (eigene Wahl: `useDeckChoice` hat sie gesetzt und lädt selbst neu), entfällt die zweite Abfrage.
   const lastDeck = useRef(slideDeckId);
   useEffect(() => {
     if (lastDeck.current === slideDeckId) return;
     lastDeck.current = slideDeckId;
-    void queryClient.invalidateQueries({ queryKey: deckOptionsKey(moduleId, sessionId) });
+    const key = deckOptionsKey(moduleId, sessionId);
+    if (queryClient.getQueryData<DeckOptions>(key)?.current_deck_id === slideDeckId) return;
+    void queryClient.invalidateQueries({ queryKey: key });
   }, [slideDeckId, queryClient, moduleId, sessionId]);
   const choice = useDeckChoice({ id: sessionId, module_id: moduleId }, onSession);
   // Nach jedem Neuverbinden des Sync-Clients nachfragen (§22.6), solange es Folien anzubieten gibt
@@ -133,13 +150,21 @@ export function SlidesPanel({
   const current = total === 0 ? 1 : Math.min(Math.max(position?.index ?? 1, 1), total);
 
   // Stand für den Tastatur-Handler, ohne ihn bei jedem Wechsel neu zu registrieren
-  const live = useRef({ current, total, active, startedAt, client, slides });
-  live.current = { current, total, active, startedAt, client, slides };
+  const live = useRef({ current, total, active, startedAt, client, slides, noDeck });
+  live.current = { current, total, active, startedAt, client, slides, noDeck };
 
   const goTo = useCallback(
     (target: number) => {
-      const { total: count, active: isActive, startedAt: start, client: sync, slides: list } = live.current;
-      if (!isActive || count === 0) return;
+      const {
+        total: count,
+        active: isActive,
+        startedAt: start,
+        client: sync,
+        slides: list,
+        noDeck: gone,
+      } = live.current;
+      // Ohne (lesbaren) Satz wird nicht geblättert: Ein `slide.change` würde die Session sperren (§22.4)
+      if (!isActive || gone || count === 0) return;
       const now = Math.min(Math.max(getPosition()?.index ?? 1, 1), count);
       const next = Math.min(Math.max(target, 1), count);
       if (next === now) return;
@@ -171,7 +196,7 @@ export function SlidesPanel({
   );
 
   useEffect(() => {
-    if (slideDeckId === null || !active) return;
+    if (noDeck || !active) return;
     function onKeyDown(e: KeyboardEvent) {
       const step = slideStep(e);
       if (step === null) return;
@@ -180,7 +205,7 @@ export function SlidesPanel({
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [slideDeckId, active, goTo, getPosition]);
+  }, [noDeck, active, goTo, getPosition]);
 
   // Die Seitenleiste folgt der aktuellen Folie (auch bei Wechseln per Taste oder vom iPad)
   const navRef = useRef<HTMLElement>(null);
@@ -197,6 +222,7 @@ export function SlidesPanel({
         active={active}
         startedAt={startedAt}
         options={options.data}
+        optionsFailed={options.isError}
         choice={choice}
       />
     );

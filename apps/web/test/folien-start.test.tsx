@@ -7,11 +7,12 @@ vi.hoisted(() => {
   process.env.TZ = 'Europe/Zurich';
 });
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Session, SlideDeck } from '@sg/shared';
 import { AppShell } from '../src/components/AppShell.tsx';
 import { HeuteView } from '../src/components/HeuteView.tsx';
+import { ModuleSessionButton } from '../src/components/today/SpontaneousStart.tsx';
 import { QueryProvider } from '../src/lib/query.tsx';
 import { sessionHref } from '../src/lib/sessions.ts';
 import type { SyncClient } from '../src/lib/sync/client.ts';
@@ -99,12 +100,18 @@ function decks(): SlideDeck[] {
   ];
 }
 
+const syncHandlers = new Map<string, Set<() => void>>();
 function fakeSync() {
   const client = {
     connectionState: 'online',
     connect: vi.fn(async () => undefined),
     disconnect: vi.fn(),
-    onEvent: vi.fn(() => () => undefined),
+    onEvent: vi.fn((name: string, fn: () => void) => {
+      const set = syncHandlers.get(name) ?? new Set();
+      set.add(fn);
+      syncHandlers.set(name, set);
+      return () => void set.delete(fn);
+    }),
     takeOver: vi.fn(),
     listShelf: vi.fn(async () => []),
     subscribe: vi.fn(),
@@ -152,6 +159,7 @@ const card = () => screen.getByRole('region', { name: /Datenbanksysteme/ });
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
+  syncHandlers.clear();
   window.sessionStorage.clear();
   push.mockClear();
 });
@@ -405,6 +413,99 @@ describe('Start-Karte: Folien', () => {
     expect(core.sessions.find((s) => s.id === SESSION_ID)?.slide_deck_id).toBe(created.id);
     expect(screen.queryByRole('list', { name: 'Foliensätze' })).toBeNull();
     await waitFor(() => expect(screen.getByTestId('start-deck')).toHaveTextContent('Folien: Mein Skript'));
+  });
+});
+
+describe('Start-Karte: Folien, Start gegen veralteten Stand', () => {
+  it('Wahl, deren Neuladung der Optionen hängt: der Start schickt den alten Vorschlag nicht mehr', async () => {
+    const user = userEvent.setup();
+    boot();
+    await row();
+    // Ab jetzt hängt jede Abfrage der Optionen (die Neuladung nach dem PATCH kommt nie an)
+    const coreFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).includes('/deck-options')
+        ? new Promise<Response>(() => undefined)
+        : coreFetch(input, init),
+    );
+    await user.click(screen.getByRole('button', { name: 'Ändern' }));
+    await user.click(
+      within(screen.getByRole('list', { name: 'Foliensätze' })).getByText('VL 05 Normalformen'),
+    );
+    await waitFor(() => expect(patch()).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.getByTestId('start-deck')).toHaveTextContent('Folien: VL 05 Normalformen'),
+    );
+    await user.click(screen.getByRole('button', { name: 'Start' }));
+    await waitFor(() => expect(push).toHaveBeenCalled());
+    // Der Start schickt kein Feld: Im Core bleibt die Wahl D1 stehen (ein Start mit Satz überschriebe sie)
+    expect(post(/\/start$/)[0]!.body).toEqual({ started_from: 'mac' });
+    expect(core.sessions.find((s) => s.id === SESSION_ID)?.slide_deck_id).toBe(D1);
+  });
+
+  it('ein Satz, den ein anderer Weg gesetzt hat, wird beim Start nicht mit dem alten Vorschlag überschrieben', async () => {
+    const user = userEvent.setup();
+    boot();
+    await row();
+    const sessionGets = () =>
+      core.requests.filter((r) => r.method === 'GET' && r.path.startsWith('/sessions'));
+    const before = sessionGets().length;
+    // Anderer Tab / Modulseite setzt D1; die Karte erfährt es über die Sessions (Neuverbinden), die Optionen sind alt
+    const stored = core.sessions.find((s) => s.id === SESSION_ID)!;
+    stored.slide_deck_id = D1;
+    stored.updated_at = '2026-11-04T07:09:00Z';
+    await act(async () => {
+      syncHandlers.get('leader.changed')?.forEach((fn) => fn());
+    });
+    await waitFor(() => expect(sessionGets().length).toBeGreaterThan(before));
+    await act(async () => undefined);
+    await user.click(screen.getByRole('button', { name: 'Start' }));
+    await waitFor(() => expect(push).toHaveBeenCalled());
+    expect(post(/\/start$/)[0]!.body).toEqual({ started_from: 'mac' });
+    expect(core.sessions.find((s) => s.id === SESSION_ID)?.slide_deck_id).toBe(D1);
+  });
+
+  it('„PDF hochladen …“ und sofort Start, solange der Upload läuft: der Start schickt den Vorschlag nicht mit', async () => {
+    boot();
+    await row();
+    fireEvent.click(screen.getByRole('button', { name: 'Ändern' }));
+    const input = screen.getByLabelText('PDF-Dateien auswählen', { selector: 'input' }) as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [new File(['%PDF-1.4'], 'Mein_Skript.pdf', { type: 'application/pdf' })] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    await waitFor(() => expect(push).toHaveBeenCalled());
+    expect(post(/\/start$/)[0]!.body).toEqual({ started_from: 'mac' });
+    // Der Upload hängt seinen Satz an (Core), der Vorschlag D2 hat ihn nicht überschrieben
+    await waitFor(() => expect(core.decks.some((d) => d.title === 'Mein Skript')).toBe(true));
+    const created = core.decks.find((d) => d.title === 'Mein Skript')!;
+    await waitFor(() =>
+      expect(core.sessions.find((s) => s.id === SESSION_ID)?.slide_deck_id).toBe(created.id),
+    );
+  });
+});
+
+describe('Modulseite: Start-Knopf', () => {
+  it('fragt die Folien nicht ab, solange schon eine Session läuft', async () => {
+    vi.setSystemTime(new Date('2026-11-04T07:50:00Z'));
+    core = installCalendarCore({
+      semesters: [makeSemester()],
+      modules: [DBS],
+      decks: decks(),
+      sessions: [planned({ state: 'laeuft', started_at: '2026-11-04T07:16:00Z' })],
+      events: [EVENT],
+    });
+    render(
+      <ThemeProvider>
+        <QueryProvider>
+          <AppShell syncClient={fakeSync()} recordingEnv={fakeRecording().env}>
+            <ModuleSessionButton moduleId={DBS.id} />
+          </AppShell>
+        </QueryProvider>
+      </ThemeProvider>,
+    );
+    expect(await screen.findByRole('link', { name: 'Zur laufenden Session' })).toBeInTheDocument();
+    expect(core.requests.some((r) => r.path.includes('/deck-options'))).toBe(false);
   });
 });
 

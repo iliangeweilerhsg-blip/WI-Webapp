@@ -20,6 +20,8 @@ export interface StartDeck {
   open: boolean;
   setOpen: (open: boolean) => void;
   choice: ReturnType<typeof useDeckChoice>;
+  /** PDF-Upload für diese Session; ab dem Anstoßen schickt der Start den Vorschlag nicht mehr mit */
+  upload: ((files: File[]) => void) | undefined;
   options: ReturnType<typeof useDeckOptions>['data'];
   onChoose: (deckId: string | null) => Promise<void>;
 }
@@ -36,15 +38,20 @@ export function useStartDeck(
   const choice = useDeckChoice(session, onSession);
   const [noDeck, setNoDeck] = useState(false);
   const [open, setOpen] = useState(false);
+  // Ein Upload für diese Session läuft oder lief: Er hängt den Satz selbst an, der Start schickt nichts mit
+  const [uploading, setUploading] = useState(false);
   const sessionId = session?.id;
   useEffect(() => {
     setNoDeck(sessionId ? readNoDeck(sessionId) : false);
     setOpen(false);
+    setUploading(false);
   }, [sessionId]);
 
   const options = query.data;
-  const currentId = options?.current_deck_id ?? null;
-  // Ein Vorschlag nur ohne Satz und ohne ausdrückliches „Ohne Folien“
+  // Maßgeblich ist der Zeiger der Session (aktueller als die Momentaufnahme); sagen die Optionen, es gebe schon einen
+  // Satz (anderer Weg, Upload), gilt auch das. Ein Vorschlag nur, wenn beide „kein Satz“ sagen.
+  const currentId = session?.slide_deck_id ?? options?.current_deck_id ?? null;
+  // … und nur ohne ausdrückliches „Ohne Folien“
   const suggestedId = currentId === null && !noDeck ? (options?.suggested_deck_id ?? null) : null;
   const shownId = currentId ?? suggestedId;
   const shown = options?.items.find((item) => item.deck.id === shownId) ?? null;
@@ -60,13 +67,20 @@ export function useStartDeck(
   }
 
   return {
-    // Hat die Session schon einen Satz, bleibt er stehen: kein Feld im Start
-    startDeckId: suggestedId ?? undefined,
+    // Hat die Session schon einen Satz, bleibt er stehen: kein Feld im Start. Auch nicht mitten in einer Wahl oder in
+    // einem Upload: Ein Start mit Satz überschreibt im Core ohne Prüfung (§22.4).
+    startDeckId: choice.busy || uploading ? undefined : (suggestedId ?? undefined),
     shown,
     ready: options !== undefined,
     open,
     setOpen,
     choice,
+    upload: choice.upload
+      ? (files: File[]) => {
+          setUploading(true);
+          choice.upload?.(files);
+        }
+      : undefined,
     options,
     onChoose,
   };
@@ -79,7 +93,7 @@ const changeButton =
 export function StartDeckRow({ deck, sessionId }: { deck: StartDeck; sessionId: string }) {
   const toggle = useRef<HTMLButtonElement>(null);
   const wasOpen = useRef(false);
-  const { open, setOpen, options, shown, choice } = deck;
+  const { open, setOpen, options, shown, choice, upload } = deck;
   // Beim Schließen (Wahl oder Esc) geht der Fokus zurück auf „Ändern“
   useEffect(() => {
     if (wasOpen.current && !open) toggle.current?.focus();
@@ -124,10 +138,10 @@ export function StartDeckRow({ deck, sessionId }: { deck: StartDeck; sessionId: 
             selectedId={selectedId}
             allowNone
             busy={choice.busy}
-            {...(choice.upload
+            {...(upload
               ? {
                   onUpload: (files: File[]) => {
-                    choice.upload?.(files);
+                    upload(files);
                     setOpen(false);
                   },
                 }
