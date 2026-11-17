@@ -1210,7 +1210,7 @@ Basis `/api/v1`. Die Pfade sind festgelegt (Lead, Review #133).
 
 ### 17.4 Ablauf des Abgleichs
 
-- **Wann:** beim Start des Core, danach alle 2 h, auf Knopfdruck (`POST /moodle/sync`), nach dem Bestätigen einer Zuordnung und nach einer Entscheidung in der Inbox. Immer nur ein Lauf gleichzeitig. Direkt gestartet wird nur, wenn weder einer läuft noch einer wartet. Sonst geht die Anfrage im angehängten Lauf auf (Kurse zusammengefasst).
+- **Wann:** beim Start des Core, danach alle 2 h, auf Knopfdruck (`POST /moodle/sync`), nach dem Bestätigen einer Zuordnung, nach einer Entscheidung in der Inbox und zur Vorlesung (§17.8, nur die Kurse des Moduls, interner Anlass `vorlesung`, schreibt `last_run` nicht). Immer nur ein Lauf gleichzeitig. Direkt gestartet wird nur, wenn weder einer läuft noch einer wartet. Sonst geht die Anfrage im angehängten Lauf auf (Kurse zusammengefasst).
 - **Beenden des Core:** Neue Läufe starten nicht mehr, der angehängte wird verworfen. Der laufende bricht zwischen zwei Dateien bzw. Kursen ab (`error_code = abgebrochen`). Das Beenden wartet höchstens `SHUTDOWN_WAIT_MS` (7 s, unter der harten Frist von 10 s in `main.ts`).
 - **Zugang:** `nicht_eingerichtet` → kein Lauf (`MoodleSyncStatus.state = aus`). `ungueltig`/`abgelaufen` oder `moodle_token_invalid` während des Laufs → Lauf endet sofort mit `error_code = moodle_token_invalid`, `state = pausiert` (F-MDL-01).
 - **Automatik:** Ein voller Lauf (Start, Zeitplan, „Jetzt abgleichen“ ohne `course_id`) ordnet zuerst neue Kurse automatisch zu (§17.7). Die neuen Zuordnungen gleicht derselbe Lauf schon ab. Scheitert die Automatik, gleicht der Lauf die bestehenden Zuordnungen trotzdem ab (`ok = false`).
@@ -1267,6 +1267,215 @@ Bewusste Abweichung von F-MDL-03 („jede Zuordnung bestätigen“): Kurse werde
 **Neue Fehlercodes:** `moodle_link_not_found`, `moodle_item_not_found` (404), `moodle_link_disabled` (409), `moodle_module_not_removable` (409, #141). `MoodleSyncRun.error_code` kann außerdem `abgebrochen` sein (Beenden des Core).
 
 **Zeitformat:** Die neuen Antworten liefern Zeiten nach §6 (ohne `.000`). Die Lese-Endpunkte aus T1-22 liefern noch `.000Z`, das gleicht Folge-Issue #129 an.
+
+### 17.8 Abgleich zur Vorlesung (F3, §22.6)
+
+Damit Folien, die kurz vor oder während einer Vorlesung in Moodle erscheinen, rechtzeitig als Vorschlag da sind (§22.2), stößt der Core für die Kurse des Moduls einen Abgleich an. Der Abgleich ist **kein Job**: Er läuft wie bisher im Core-Prozess (`MoodleSync`, er braucht den Token). Es gibt keine neue Tabelle, keine Migration, keinen neuen Endpunkt und keine Änderung am Worker, am iPad oder an der Web-App.
+
+**Schema: keine Änderung** (entschieden nach Review, 17.11.). Der Anlass `vorlesung` ist ein interner Wert des Core und steht **nicht** in `MoodleSyncTrigger` (`packages/schemas/src/moodle.schema.json`). Es gibt kein Codegen und kein neues Beispiel (`MoodleSyncStatus.vorlesung.json` entfällt).
+
+- **Grund:** `MoodleSyncTrigger` kommt im Schema nur in `MoodleSyncRun.trigger` vor und `MoodleSyncRun` nur in `MoodleSyncStatus.last_run`. `MoodleSyncStatus` zeigt keinen laufenden Lauf (nur `state = laeuft`, ohne Anlass). Die Routen verwerfen das Ergebnis von `sync.run` (`routes/moodle.ts`). Weil ein Lauf `vorlesung` `last_run` nicht schreibt (siehe „Status und Oberfläche“), wäre der Wert über die API nie sichtbar. Ein Enum-Wert, den kein Client je bekommt, kostet nur generierte Dateien in drei Sprachen.
+- **Intern** in `services/core/src/moodle/sync.ts`: `export type SyncTrigger = MoodleSyncTrigger | 'vorlesung'` und `export type SyncRun = Omit<MoodleSyncRun, 'trigger'> & { trigger: SyncTrigger }`. `run`, `begin`, `execute`, `abortedRun`, `emptyRun` und `Queued` arbeiten mit `SyncTrigger` bzw. `SyncRun`, ebenso alle Funktionen, die einen Lauf durchreichen (heute `syncAll`, `autoAssign`, `syncCourse` und die Kurs-Hilfsfunktion, die `run: MoodleSyncRun` nimmt). `lastRun` und `status()` bleiben bei `MoodleSyncRun`. `SyncRun` ist kein diskriminierter Union-Typ, ein Vergleich `run.trigger !== 'vorlesung'` verengt nicht: Die Zuweisung an `lastRun` braucht einen Type-Guard (`function isApiRun(run: SyncRun): run is MoodleSyncRun`). So kann `vorlesung` nicht in die API gelangen.
+- Soll die Oberfläche den Anlass später zeigen, ist der Enum-Wert eine reine Ergänzung.
+- Keine Migration (alles liegt im Speicher), keine Änderung an iPad, Worker und Web-App.
+
+**Bedarf (Core-Takt, `services/core/src/services/sessions.ts`).** Der Takt (§9.1, jede Minute) meldet, welche Module einen Abgleich brauchen. Er ruft Moodle nie selbst.
+
+- **Gültiger Satz** einer Session: `slide_deck_id` ist gesetzt, der Satz ist nicht gelöscht und gehört zum Modul der Session (wie `usableDeckId`, „kein Satz“ in §22.2).
+- `runSessionTick` liefert neu `SessionTickResult` statt `void`:
+  - `becameReady: string[]`: Module der Sessions, die **dieser** Takt von `geplant` auf `bereit` gesetzt hat und die keinen gültigen Satz haben.
+  - `activeWithoutDeck: string[]`: Module der nicht gelöschten Sessions in `laeuft` oder `pausiert` ohne gültigen Satz, Stand am Ende des Takts (nach der Auto-Stopp-Rückfallebene: Eine in diesem Takt beendete Session zählt nicht).
+  - Beide Listen ohne Dubletten, aufsteigend sortiert. Der frühe Ausstieg des Takts (keine aktive Session) liefert `becameReady` trotzdem.
+- Die Listen entstehen in der Transaktion des Takts, nur lesend (`session` mit `slide_deck`), **ohne neue Sperre**.
+- `SessionTickerOptions.afterTick?: (result: SessionTickResult, options: SessionTickOptions) => void`. `startSessionTicker` ruft ihn nach jedem **gelungenen** Takt auf, also nach dem Commit, und nie nach einem gescheiterten Takt. Der Aufruf ist synchron und wartet auf nichts. Wirft er, geht der Fehler an `onError`, der Takt läuft weiter.
+- `sessions.ts` importiert nichts aus `moodle/**`. `startSession`, `transitionSession`, `createSession` und die Routen bleiben unverändert.
+
+**Die drei Anlässe** (§22.6) ergeben sich daraus:
+
+| Anlass | Quelle | Wann |
+|---|---|---|
+| 1. `geplant → bereit` (15 min vor Beginn) | `becameReady` | im Takt des Übergangs, einmal je Übergang |
+| 2. Start (REST, Start-Karte, spontan, Geräte-Start über den Sync) | `activeWithoutDeck` | im ersten Takt nach dem Start, also **höchstens 60 s danach** |
+| 3. Laufende Session ohne Folien | `activeWithoutDeck` | Jeder Takt meldet das Modul, die Drossel lässt alle 10 min einen Anstoß durch |
+
+Präzisierung gegenüber der ersten Fassung von §22.6 („beim Start“): Der Start hat keinen eigenen Aufruf. Er ist der erste Takt, der die Session in `laeuft` sieht. Gründe:
+
+1. Der Anstoß liegt so immer nach dem Commit und außerhalb jeder Transaktion, ohne Eingriff in `startSession` (der in der Transaktion des Aufrufers läuft, bei REST wie im Sync-Dispatcher).
+2. Ein nachgelieferter Geräte-Start einer längst beendeten Session löst nichts aus.
+3. Der Bedarf hängt am Zustand, nicht an einem einzelnen Ereignis: Ein verlorener Anstoß (Neustart, Fehler) holt sich im nächsten Takt nach.
+4. Die Live-Ansicht fragt `deck-options` ohnehin nur alle 60 s ab (§22.6).
+
+**Fälle ohne Anlass 1** (hingenommen). `becameReady` meldet nur Übergänge, die der Takt selbst macht:
+
+- Eine Session, die vor `bereit` gestartet wird, und eine spontane Session (sie entsteht in `bereit`, ohne Übergang) fallen unter Anlass 2.
+- **Kalender-Import:** `ensurePlannedSessions` legt eine Session direkt in `bereit` an oder setzt sie dorthin, wenn der Termin beim Import schon im Fenster von 15 min liegt (`plannedState`). Der Takt sieht dann keinen Übergang. Auch diese Session fällt unter Anlass 2.
+- **Core-Neustart zwischen 15 min vorher und dem Beginn:** Macht der Start-Takt den Übergang, meldet er ihn zwar, aber `onTick` übergeht den Start-Takt. War der Übergang schon vor dem Neustart, meldet ihn niemand noch einmal. In beiden Fällen läuft beim Core-Start der volle Abgleich (§17.4, `moodleSchedule`), er umfasst die Kurse des Moduls. Danach gilt Anlass 2.
+
+Ein eigener Nachhol-Anstoß für diese Fälle ist bewusst nicht vorgesehen.
+
+**Anstoß (`LectureSync`, neu in `services/core/src/moodle/lecture.ts`).**
+
+```ts
+export const LECTURE_SYNC_THROTTLE_MS = 10 * 60 * 1000;
+export type LectureSyncOutcome =
+  | 'gedrosselt'
+  | 'kein_zugang'
+  | 'kein_kurs'
+  | 'gedeckt'
+  | 'angehaengt'
+  | 'gestartet'
+  | 'gestoppt'
+  | 'fehler';
+export interface LectureDemand {
+  becameReady: readonly string[];
+  activeWithoutDeck: readonly string[];
+}
+export interface LectureSyncOptions {
+  db: Db;
+  sync: Pick<MoodleSync, 'runForLecture'>;
+  status: Pick<MoodleStatusService, 'getStatus'>;
+  logger?: { debug: (obj: object, msg: string) => void; warn: (obj: object, msg: string) => void };
+  now?: () => Date;
+  throttleMs?: number;
+  /** Kurse des Moduls, Standard: `activeCourseIdsOfModule(db, moduleId)` (nur für Tests ersetzbar) */
+  coursesOf?: (moduleId: string) => Promise<number[]>;
+}
+export class LectureSync {
+  constructor(options: LectureSyncOptions);
+  /** Nimmt das Ergebnis eines Takts. Wirft nie, wartet auf nichts */
+  onTick(demand: LectureDemand, options?: { startup?: boolean }): void;
+  /** Ein Modul. Erfüllt sich mit der Entscheidung, nicht mit dem Ende des Laufs. Wird nie verworfen */
+  request(moduleId: string): Promise<LectureSyncOutcome>;
+  /** Zahl der Module in der Drossel (nur für Tests) */
+  get tracked(): number;
+}
+```
+
+- `LectureDemand` ist bewusst ein eigener Typ mit derselben Form wie `SessionTickResult`: `moodle/lecture.ts` importiert nichts aus `services/sessions.ts`.
+- `onTick`: Bei `startup: true` passiert nichts (beim Core-Start läuft ohnehin der volle Abgleich, §17.4; eine laufende Session ohne Folien meldet der nächste Takt wieder). Sonst für jedes Modul aus beiden Listen (ohne Dubletten, aufsteigend) `void request(id)`.
+- `request` prüft in dieser Reihenfolge, die erste zutreffende Zeile gilt:
+
+| Schritt | Lage | Ergebnis |
+|---|---|---|
+| 1 | Der letzte Anstoß des Moduls ist weniger als `throttleMs` her | `gedrosselt`. Sonst wird **sofort** (vor dem ersten `await`) der Zeitpunkt gemerkt |
+| 2 | Zugang `nicht_eingerichtet`, `ungueltig` oder `abgelaufen` (`status.getStatus()`) | `kein_zugang`: kein Lauf, `last_run` bleibt unberührt |
+| 3 | Das Modul hat keinen Kurs (`coursesOf` liefert eine leere Liste) | `kein_kurs`: kein Lauf |
+| 4 | `sync.runForLecture(kurse)` (Kurse aufsteigend nach `moodle_course_id`) | `gestoppt`, `gedeckt`, `angehaengt` oder `gestartet` |
+| – | Schritt 2 bis 4 wirft (z. B. Datenbank nicht erreichbar) | `fehler`, ein Eintrag `warn` („Abgleich zur Vorlesung nicht angestoßen“, mit `module_id`) |
+
+- **Kursabfrage:** `activeCourseIdsOfModule(db: DbOrTx, moduleId: string): Promise<number[]>`, neu in `services/core/src/moodle/store.ts`. Sie liefert `moodle_course_id` der Zuordnungen des Moduls mit denselben Filtern wie `activeLinks`: `sync_enabled = true`, Modul nicht gelöscht (`notDeleted(courseModule)`), aufsteigend nach `moodle_course_id`. Ein unbekanntes oder gelöschtes Modul ergibt eine leere Liste, keinen Fehler.
+- `nicht_erreichbar` zählt nicht als fehlender Zugang: Der Zustand ist bis zu 60 s alt (§17.3), und im Hörsaal kommt das Netz oft gerade wieder. Der Lauf startet und scheitert notfalls am Kurs (`failed_courses`, §17.4).
+- Protokoll: jede Entscheidung auf `debug` (`module_id`, `outcome`), sonst nichts. Den Lauf selbst protokolliert `MoodleSync` wie bisher.
+
+**Drossel.**
+
+- **Schlüssel:** `module_id`. **Dauer:** 10 min (`LECTURE_SYNC_THROTTLE_MS`), gemessen ab dem letzten Anstoß, der Schritt 1 passiert hat.
+- **Der Zeitpunkt wird in jedem Fall gemerkt**, auch bei `kein_zugang`, `kein_kurs`, `gedeckt`, `gestoppt` und `fehler`. So fragt der Core je Modul höchstens alle 10 min den Zugang, die Kurse oder Moodle ab, auch wenn der Takt das Modul jede Minute meldet (keine Lawine, auch nicht im Protokoll). Unabhängig von der Zahl der Module gibt es zu jedem Zeitpunkt **höchstens zwei Läufe**: einen laufenden und einen angehängten (siehe `runForLecture`). Folge: Nach einem neuen Login mitten in der Vorlesung dauert es bis zu 10 min bis zum nächsten Anstoß. „Jetzt abgleichen“ (`POST /moodle/sync`) geht sofort.
+- **Alle drei Anlässe teilen sich die Drossel.** Liegt der Start weniger als 10 min nach Anlass 1, entfällt Anlass 2. Der erste Takt nach Ablauf der 10 min stößt wieder an (Anlass 3).
+- **Abstand in der Praxis:** etwa 10 bis 11 min. Der Takt kommt jede Minute, mit etwas Jitter (`setInterval`, Dauer des Takts). Ein Takt, der weniger als `throttleMs` nach dem letzten Anstoß kommt, ist noch gedrosselt, erst der nächste stößt an.
+- **Uhr:** `now()` (für Tests einstellbar). Liegt der gemerkte Zeitpunkt in der Zukunft (Uhr zurückgestellt), gilt die Drossel als abgelaufen. Bei jedem `request` werden alle Einträge entfernt, die nicht mehr drosseln: Alter mindestens `throttleMs` oder Zeit in der Zukunft (aller Module, vor Schritt 1). Die `Map` wächst so nicht über die Module der letzten 10 min hinaus.
+- **Neustart:** Die Drossel liegt nur im Speicher (eine `Map` in `LectureSync`) und ist nach einem Neustart leer. Der Start-Takt stößt nichts an. Der nächste Takt (nach 60 s) meldet eine laufende Session ohne Folien wieder: Läuft oder wartet dann noch der volle Abgleich des Core-Starts, ist das Modul `gedeckt`. Sonst gibt es genau einen Lauf.
+- **Andere Anlässe** (`start`, `zeitplan`, `manuell`, `entscheidung`, `zuordnung`) kennen die Drossel nicht und setzen sie nicht. Der Abgleich alle 2 h läuft unverändert weiter, `next_run_at` ändert sich nicht.
+
+**`MoodleSync.runForLecture(courseIds: readonly number[]): 'gestartet' | 'angehaengt' | 'gedeckt' | 'gestoppt'`** (neu in `services/core/src/moodle/sync.ts`). Synchron, wirft nie, wartet nicht auf den Lauf.
+
+- Nach `stop()`: `gestoppt`, kein Lauf. Leere Liste: `gedeckt`, kein Lauf.
+- **Gedeckt:** Der laufende **oder** der angehängte Lauf umfasst **je für sich allein** alle Kurse (voller Lauf oder Obermenge). Dann entsteht kein weiterer Lauf. Decken beide nur zusammen, gilt das nicht: Die Anfrage wird angehängt. Ein Kurs kann so in einem zusammengefassten Lauf noch einmal abgeglichen werden, das ist harmlos (unveränderte Dateien werden weder geladen noch geschrieben).
+- Dafür merkt sich `MoodleSync` den Umfang des laufenden Laufs (`null` = voller Lauf). Er wird beim Start des Laufs gesetzt und **bei seinem Ende gelöscht**, an derselben Stelle wie `current` (`finally` in `begin`), auch nach einem Fehler oder Abbruch. Nach dem Ende deckt der Lauf nichts mehr. Dass der laufende Lauf den Kurs vielleicht schon hinter sich hat, wird hingenommen (der nächste Anstoß kommt nach rund 10 min).
+- Sonst `run('vorlesung', courseIds)` wie in §17.4: `gestartet`, wenn weder ein Lauf läuft noch einer wartet, sonst `angehaengt` (die Kurse gehen im angehängten Lauf auf).
+- Damit gibt es **nie zwei Läufe gleichzeitig und nie mehr als einen wartenden**, auch wenn Zeitplan, Knopf und Vorlesung zusammenfallen. Im Speicher stehen also höchstens zwei Läufe (ein laufender, ein angehängter), egal wie viele Module gleichzeitig Bedarf melden: Weitere Anstöße gehen im angehängten Lauf auf. Fordert ein anderer Anlass einen Lauf an, während ein Lauf `vorlesung` läuft, wird er wie bisher angehängt und gleicht die Kurse danach noch einmal ab. Das ändert keine Daten (unveränderte Dateien werden weder geladen noch geschrieben, §17.4).
+- **`vorlesung` ist der schwächste Anlass:** Geht eine Anfrage mit anderem Anlass in einem angehängten Lauf mit `trigger = vorlesung` auf, übernimmt der angehängte Lauf deren Anlass. So schreibt ein Lauf, den der Nutzer per Knopf verlangt hat, immer `last_run`. Für alle anderen Paare bleibt es beim Anlass der ersten angehängten Anfrage (geht `vorlesung` in einem angehängten Lauf mit anderem Anlass auf, behält der seinen Anlass und schreibt `last_run`).
+- **`last_run` (Lead-Entscheidung, 17.11.):** Ein Lauf, der mit `trigger = vorlesung` startet, überschreibt `last_run` **nicht**. Er schreibt nur ins Protokoll („Moodle-Abgleich beendet“ mit `trigger: 'vorlesung'`, wie bisher auf `info`) und in den internen Wert `lastLectureRun`. Maßgeblich ist der Anlass beim Start des Laufs.
+- **`get lastLectureRun(): SyncRun | null`** an `MoodleSync`: der letzte beendete Lauf mit `trigger = vorlesung`, nur im Speicher, für Tests und Protokoll. Er steht in keiner Antwort der API. Ein nach `stop()` verworfener Lauf (`abortedRun`) setzt ihn nicht, wie bisher `last_run`.
+
+**Was der Lauf tut.** Ein Lauf `vorlesung` ist ein gewöhnlicher Kurs-Lauf nach §17.4, ohne eigenen Zweig:
+
+- Er umfasst nur die Kurse des Moduls und **keine** automatische Kurszuordnung (die läuft nur im vollen Lauf).
+- Er gleicht alle Dateien dieser Kurse ab (Folien, Übungsblätter, Inbox) und die Fristen dieser Kurse. Ein Lauf „nur Folien“ ist bewusst **nicht** vorgesehen: Die Art einer Datei steht erst nach dem Lesen des Kursinhalts fest, ein zweiter Zweig ließe Dateien halb eingeordnet zurück, und die Fristen kosten zwei kleine Aufrufe. Last für Moodle: je Modul höchstens alle 10 min ein Kursinhalt und die beiden Fristen-Aufrufe, Dateien nur, wenn sie neu oder geändert sind.
+- **Er verknüpft nichts** (§22.6): `createSlideDeck` ohne `session_id`, kein Schreiben an `session`, kein `session.updated`, kein neues Ereignis. Ein neuer Satz ist frei und erscheint über `deck-options` als Vorschlag (§22.2). Die Live-Ansicht fragt ihn ab (§22.6), die Start-Karte beim Laden.
+- `pdf.ingest` für einen neuen Satz läuft wie bei jedem Abgleich, auch während der Aufnahme.
+
+**Fehler und Sonderfälle.** Kein Fall verzögert oder verhindert einen Zustandsübergang, einen Start oder den Takt: Der Anstoß läuft nach dem Commit und wird nicht abgewartet.
+
+| Lage | Verhalten |
+|---|---|
+| Kein Moodle-Login, Token abgelehnt oder abgelaufen | Kein Lauf, `last_run` bleibt, `MoodleSyncStatus.state` wie bisher `aus` bzw. `pausiert`. Nächste Prüfung frühestens nach 10 min |
+| Token wird während des Laufs abgelehnt | Wie §17.4: Der Lauf endet mit `moodle_token_invalid`, sichtbar in `lastLectureRun` und im Protokoll, `last_run` bleibt. `state = pausiert` folgt wie bisher aus dem Zugang. Danach `kein_zugang` |
+| Moodle nicht erreichbar | Lauf mit `ok = false`, `error_code = moodle_unreachable`, Kurs in `failed_courses`, `last_synced_at` des Kurses bleibt. Das steht in `lastLectureRun` und im Protokoll (`warn` „Moodle-Kurs nicht abgeglichen“), `last_run` bleibt. Nächster Versuch frühestens nach 10 min |
+| Modul ohne zugeordneten Kurs oder nur mit `sync_enabled = false` | Kein Lauf, kein Eintrag über Stufe `debug` hinaus |
+| Der Takt scheitert (Fehler in seiner Transaktion) | Kein `afterTick`, kein Anstoß, die Drossel bleibt unberührt. Der Übergang ist zurückgerollt: Der nächste Takt macht ihn erneut und meldet `becameReady` dann |
+| Fehler in einer Datei | Wie §17.4 (`moodle_item.last_error`), der Lauf geht weiter |
+| Core fährt herunter | `gestoppt` bzw. der laufende Lauf bricht ab (`abgebrochen`, §17.4). `SessionTicker.stop()` wartet nicht auf den Abgleich |
+| Session bekommt inzwischen einen Satz, endet oder wird gelöscht | Der nächste Takt meldet das Modul nicht mehr. Ein schon laufender Lauf läuft zu Ende |
+| Zwei Sessions desselben Moduls | Ein Anstoß (Drossel je Modul) |
+
+**Sperren (§16.2).** Der Anstoß nimmt keine Sperre und läuft in keiner Transaktion. Im Takt kommt nur eine Leseabfrage dazu, die Sperrreihenfolge aus §16.2 bleibt, wie sie ist. `LectureSync` liest außerhalb jeder Transaktion (`moodle_course_link`, `module`). Der Lauf selbst sperrt wie jeder Abgleich nur, was `createSlideDeck` bzw. `createExerciseSheet` **ohne** Session sperren (Advisory-Sperre der Datei, Material-Zeilen), nie `lockSessionTransitions`, nie eine Session-Zeile, nie einen Strom. Netzwerk zu Moodle gibt es damit nie unter einer Session-Sperre.
+
+**Verdrahtung (`services/core/src/app.ts`).**
+
+- `buildApp` legt `LectureSync` aus `db`, `moodleSync`, `moodle.status`, dem Logger (`module: 'moodle-lecture'`) und `options.now` an.
+- Neu in `BuildAppOptions`:
+  - `lectureSync?: Pick<LectureSync, 'onTick'>`: ersetzt die Instanz (Attrappe für Tests). Standard: die Instanz oben.
+  - `sessionTickIntervalMs?: number`: Abstand des Takts, geht als `intervalMs` an `startSessionTicker`. Standard: eine Minute. Nur für Tests, `main.ts` setzt ihn nicht. Ohne diese Option käme ein Test nicht an einen normalen Takt: Der Ticker ist in `buildApp` lokal.
+- `buildApp` gibt `afterTick: (result, o) => lectureSync.onTick(result, { startup: o.startup === true })` an `startSessionTicker`. `onTick` bekommt `startup` damit immer als `true` oder `false`, nie `undefined`.
+- Der Anstoß hängt am Takt (`sessionTicker`), nicht an `moodleSchedule`. Der Takt startet erst in `onListen` (mit `inject` allein nie), mit `sessionTicker: false` gibt es keinen Anstoß.
+
+**Status und Oberfläche.**
+
+- `GET /moodle/sync` zeigt während eines Laufs `vorlesung` wie bei jedem Lauf `state = laeuft` (Einstellungen › Moodle: „Gleicht gerade ab …“).
+- **Danach bleibt `last_run`, wie es war:** der letzte Lauf aus einem anderen Anlass (`start`, `zeitplan`, `manuell`, `entscheidung`, `zuordnung`). Gründe: Einstellungen › Moodle zeigt mit „Zuletzt abgeglichen … · n Kurse“ weiter den vollen Abgleich statt eines Laufs über einen Kurs, und ein gescheiterter Lauf zu einem Modul verdeckt keinen guten vollen Lauf.
+- Folge, bewusst hingenommen: Der Satz „Zuletzt abgeglichen …“ nennt nicht die Zeit des letzten Laufs `vorlesung`. Was dieser Lauf gebracht hat, zeigt sich an den Daten (neuer Satz als Vorschlag, Inbox, `last_synced_at` des Kurses). Scheitert er, steht das nur im Protokoll und in `lastLectureRun`.
+- `trigger = vorlesung` kommt in keiner Antwort vor (siehe „Schema“). Die Web-App wertet `trigger` ohnehin nicht aus.
+
+**Bewusst keine Anzeige** „Moodle wird geprüft …“ auf Start-Karte oder Live-Ansicht: Der Start wartet nie auf Moodle (§22.7), und eine Zeile, die alle 10 min aufblinkt, stört das Mitschreiben. Sichtbar wird nur das Ergebnis, als Vorschlag bzw. Angebot.
+
+**Tests** (Besitz in §22.11):
+
+- `services/core/test/unit/moodle-lecture.test.ts` (ohne Datenbank, Attrappen für `sync`, `status`, `coursesOf` und die Uhr):
+  1. Der erste Anstoß ruft `runForLecture` mit den Kursen des Moduls, aufsteigend.
+  2. Zweiter Anstoß nach 9 min 59 s: `gedrosselt`, kein Aufruf von `status` und `sync`. Nach 10 min: wieder ein Aufruf.
+  3. Zwei Module drosseln sich nicht gegenseitig.
+  4. Zwei gleichzeitige `request` für dasselbe Modul: genau ein Aufruf.
+  5. `nicht_eingerichtet`, `ungueltig`, `abgelaufen`: `kein_zugang`, kein `runForLecture`. Der folgende Anstoß innerhalb von 10 min ist `gedrosselt` (keine zweite Statusabfrage).
+  6. `nicht_erreichbar` und `laeuft_bald_ab`: `runForLecture` wird gerufen.
+  7. Kein Kurs: `kein_kurs`, kein `runForLecture`.
+  8. `status.getStatus()` wirft: `fehler`, ein `warn`, `request` wird nicht verworfen, der nächste Anstoß ist `gedrosselt`.
+  9. `onTick` mit `startup: true`: nichts. Ohne: Module aus beiden Listen, ein Modul in beiden Listen nur einmal. Wirft nie, auch wenn `request` scheitert.
+  10. Uhr zurückgestellt: nicht gedrosselt.
+  11. `runForLecture` liefert `gestoppt`: `request` reicht `gestoppt` durch, ohne `warn`. Ebenso `gedeckt`, `angehaengt` und `gestartet`.
+  12. `coursesOf` wirft: `fehler`, ein `warn`, `request` wird nicht verworfen, kein `runForLecture`, der nächste Anstoß ist `gedrosselt`.
+  13. Aufräumen der Drossel: Nach Anstößen für A und B und 10 min später einem Anstoß für C ist `tracked = 1`. Ein Eintrag mit Zeit in der Zukunft (Uhr zurückgestellt) ist nach dem nächsten `request` eines anderen Moduls entfernt.
+- `services/core/test/unit/moodle-sync-queue.test.ts` (Ergänzung):
+  1. `runForLecture` ohne laufenden Lauf: `gestartet`, Umfang = die Kurse. Nach dem Ende: `lastLectureRun.trigger = vorlesung`.
+  2. Ein voller Lauf läuft: `gedeckt`, es startet kein zweiter Lauf.
+  3. Ein Lauf für Kurs A läuft, Anstoß für Kurs B: `angehaengt`, danach genau ein Lauf für B. Anstoß für A währenddessen: `gedeckt`.
+  4. Angehängter voller Lauf: `gedeckt`. Angehängter Lauf für A, Anstoß für A und B: `angehaengt`, Umfang A und B.
+  5. Angehängter Lauf `vorlesung`, danach `run('manuell')`: ein Lauf, voller Umfang, `trigger = manuell`, er schreibt `last_run`. Umgekehrt (angehängt `manuell` für A, Anstoß für B) bleibt `manuell` und schreibt `last_run`.
+  6. Nach `stop()`: `gestoppt`. Leere Liste: `gedeckt`.
+  7. Nie mehr als ein Lauf gleichzeitig (`maxActive = 1`) über zehn gemischte Aufrufe, und nie mehr als ein angehängter: Anstöße für fünf verschiedene Kurse während eines Laufs ergeben danach genau einen Lauf mit allen fünf.
+  8. `last_run` bleibt: Erst ein Lauf `manuell` (voll, `ok = true`), dann ein Lauf `vorlesung`. `status().last_run` ist weiter der Lauf `manuell` (gleiches `started_at`), `lastLectureRun` ist der Lauf `vorlesung`.
+  9. Ein gescheiterter Lauf `vorlesung` (Attrappe wirft) nach einem guten vollen Lauf: `last_run.ok` bleibt `true`, `lastLectureRun.ok = false`. Ohne früheren Lauf bleibt `last_run = null`.
+  10. Der gemerkte Umfang wird beim Ende gelöscht: Nach dem Ende eines Laufs für A ist ein Anstoß für A `gestartet`, nicht `gedeckt`. Dasselbe nach einem gescheiterten Lauf.
+  11. Decken nur beide zusammen (laufend A, angehängt B, Anstoß für A und B): `angehaengt`, der angehängte Lauf umfasst A und B.
+  12. Während eines Laufs `vorlesung` ist `status().state = laeuft`.
+- `services/core/test/integration/lecture-sync.test.ts` (Postgres):
+  1. `runSessionTick` setzt eine Session ohne Satz von `geplant` auf `bereit`: Modul in `becameReady`. Der folgende Takt meldet es nicht noch einmal.
+  2. Dieselbe Lage mit gültigem Satz: nicht gemeldet. Mit gelöschtem Satz und mit Satz eines anderen Moduls: gemeldet.
+  3. `geplant → verpasst` in einem Schritt: nicht gemeldet.
+  4. Session `laeuft` bzw. `pausiert` ohne Satz: Modul in `activeWithoutDeck`, in jedem Takt. Nach `PATCH` mit Satz, nach Stopp und nach Löschen der Session nicht mehr.
+  5. Beendet der Takt die Session selbst (Auto-Stopp), steht sie in diesem Takt nicht mehr in der Liste.
+  6. `afterTick` läuft erst nach dem Commit: Im Aufruf liest eine **zweite** Verbindung den neuen Zustand `bereit`. Scheitert der Takt (Fehler in der Transaktion), läuft `afterTick` nicht.
+  7. `activeCourseIdsOfModule` gegen Postgres (F3a, eigene Datei `moodle-lecture-courses.test.ts`, §22.11): zwei Kurse aufsteigend, ein Kurs mit `sync_enabled = false` fehlt, der Kurs eines anderen Moduls fehlt, ein gelöschtes und ein unbekanntes Modul ergeben eine leere Liste (`request`: `kein_kurs`).
+  8. Ende zu Ende mit dem Moodle-Fake (`moodle-server.ts`) und echtem `MoodleSync`: Session läuft ohne Satz, Takt, Abgleich abwarten (`sync.idle()`). Der neue Satz steht in `deck-options` als `suggested_deck_id` mit `source = moodle`, `session.slide_deck_id` bleibt `null`, es gibt kein `session.updated` für die Session. `lastLectureRun` hat `trigger = vorlesung`, `ok = true`, `courses = 1`. `GET /moodle/sync` liefert dasselbe `last_run` wie vor dem Takt (`null` bzw. der vorher ausgelöste Lauf `manuell`). Ein zweiter Takt eine Minute später ruft Moodle nicht auf (Zähler der Anfragen am Fake).
+  9. Der Moodle-Fake antwortet nicht bzw. lehnt den Token ab: Der Takt und ein `POST /sessions/{id}/start` in derselben Zeit antworten wie ohne Moodle (200, Zustand `laeuft`). `lastLectureRun.ok = false` bzw. kein Lauf (`lastLectureRun = null`), `last_run` ist in beiden Fällen unverändert.
+  10. Start über REST und Start über `session.start` eines Geräts: Der nächste Takt meldet das Modul. Ein nachgelieferter Geräte-Start einer schon beendeten Session meldet nichts.
+  11. Eine Session, die `ensurePlannedSessions` direkt in `bereit` anlegt: Kein Takt meldet sie in `becameReady`. Nach dem Start steht ihr Modul in `activeWithoutDeck`.
+  12. **Verdrahtung in `buildApp`:** `startTestApp({}, { sessionTicker: true, sessionTickIntervalMs: 20, now: () => clock, lectureSync: attrappe })`, dann `app.listen({ port: 0, host: '127.0.0.1' })` (Muster in `sessions.test.ts`, „buildApp: der Takt startet erst nach erfolgreichem listen“, und `startTestApp` in `helpers.ts`). Lage: Modul A mit Session in `laeuft` ohne Satz, Modul B mit Session in `geplant`, die Uhr steht vor dem Fenster von B.
+      - Der Start-Takt ruft `onTick` genau einmal mit `startup: true`, `activeWithoutDeck = [A]` und `becameReady = []`.
+      - Uhr ins Fenster von B stellen: Der nächste Takt ruft `onTick` mit `startup: false`, `becameReady = [B]` und `activeWithoutDeck = [A]`. Die Takte danach haben `becameReady = []`.
+      - Kein Aufruf vor `listen` (nach `ready` allein: null Aufrufe). Mit der Attrappe wird kein echter Abgleich gestartet.
+- `packages/schemas`: keine neuen Tests, `pnpm schemas:check` bleibt ohne Änderung grün (das Schema wird nicht angefasst).
+- `moodle-architecture.test.ts` bleibt unverändert grün (`moodle/lecture.ts` importiert weder `moodle/actions` noch nutzt es einen schreibenden Aufruf).
 
 ---
 
@@ -2532,13 +2741,13 @@ Ob der Upload die Session bekommen hat, liest der Client aus `Session.slide_deck
 
 - **Der Abgleich verknüpft nichts.** `createSlideDeck` bleibt dort ohne `session_id`. Ein neuer Satz ist frei und erscheint damit von selbst als Vorschlag (22.2). Kein Flag an Session oder Satz, kein neues Sync-Ereignis.
 - **Wie die Live-Ansicht davon erfährt:** Solange die offene Session `laeuft` oder `pausiert`, fragt die Web-App `GET /modules/{id}/deck-options?session_id` ab: beim Öffnen, wenn der Tab sichtbar wird, und sonst alle 60 s (nur im sichtbaren Tab), mit und ohne Satz. Ohne Satz gehört dazu auch jedes Neuverbinden des Sync-Clients. Der Core läuft lokal, die Abfrage ist billig. Ein eigenes Ereignis wäre eine Änderung am Sync-Protokoll für alle Clients und lohnt hier nicht. Mit Satz dient die Abfrage der Sperre (`lock`) und der Erkennung eines von außen gelöschten Satzes (`current_deck_id = null`): Die Ansicht sendet dann kein `slide.change` mehr. Ein Satz, der in den letzten 60 s gelöscht wurde, kann noch ein `slide.change` bekommen; das Restfenster ist klein und wird hingenommen (Verspätete `slide.change`, 22.4).
-- **Abgleich zur Vorlesung (neu):** Damit Folien, die der Dozent kurz vorher hochlädt, rechtzeitig da sind, stößt der Core für die Kurse des Moduls (`moodle_course_link` mit `sync_enabled`) einen Abgleich an:
+- **Abgleich zur Vorlesung (neu, verbindlich in §17.8):** Damit Folien, die der Dozent kurz vorher hochlädt, rechtzeitig da sind, stößt der Core für die Kurse des Moduls (`moodle_course_link` mit `sync_enabled`) einen Abgleich mit dem internen Anlass `vorlesung` an (kein Wert im Schema, §17.8):
   1. beim Übergang `geplant → bereit` (15 min vor Beginn),
-  2. beim Start einer Session (REST oder Geräte-Start über den Sync),
-  3. im Core-Takt alle 10 min, solange eine Session des Moduls `laeuft` oder `pausiert` ist und keinen Satz hat.
+  2. nach dem Start einer Session (REST oder Geräte-Start über den Sync), im ersten Core-Takt danach, also höchstens 60 s später,
+  3. etwa alle 10 bis 11 min, solange eine Session des Moduls `laeuft` oder `pausiert` ist und keinen Satz hat (Takt-Jitter: Ein Takt, der weniger als `throttleMs` nach dem letzten Anstoß kommt, ist noch gedrosselt).
 
-  Anstoß 1 und 2 gibt es nur, wenn die Session keinen (nicht gelöschten) Satz hat. Eine Drossel im Speicher je Modul lässt höchstens alle 10 min einen Anstoß zu, gemessen ab dem letzten Anstoß.
-- **Regeln dafür:** `MoodleSync.run` mit den Kursen des Moduls und dem neuen Wert `vorlesung` in `MoodleSyncTrigger` (`moodle.schema.json`). Es gilt §17.4 (ein Lauf gleichzeitig, sonst angehängt, kein Lauf ohne gültigen Zugang). Der Anstoß läuft **nach** dem Commit des Übergangs, wartet nicht auf das Ergebnis und kann Start und Takt weder verzögern noch scheitern lassen. Fehler stehen nur im Status des Abgleichs (§17.3). Wie die Statusanzeige den Anlass `vorlesung` zeigt, legt F3 fest.
+  Jeder Anlass gilt nur für Sessions ohne gültigen Satz (keiner, gelöscht oder aus einem anderen Modul). Eine Drossel im Speicher je Modul lässt höchstens alle 10 min einen Anstoß zu, gemessen ab dem letzten Anstoß. Anlass 2 und 3 sind technisch dieselbe Regel: Der Takt meldet jede Minute die Module mit laufender Session ohne Satz, die Drossel macht daraus den Abstand von mindestens 10 min. Eine Session, die der Kalender-Import direkt in `bereit` anlegt, und ein Core-Neustart im Fenster vor dem Beginn bekommen Anlass 1 nicht (§17.8, „Fälle ohne Anlass 1“).
+- **Regeln dafür (§17.8):** Der Takt meldet den Bedarf erst nach seinem Commit an `LectureSync`. Der Anstoß läuft in keiner Transaktion, nimmt keine Sperre, wartet nicht auf das Ergebnis und kann Übergang, Start und Takt weder verzögern noch scheitern lassen. `startSession` bleibt unverändert. Es gilt §17.4 (ein Lauf gleichzeitig, sonst angehängt). Deckt ein laufender oder wartender Lauf die Kurse schon ab, entsteht kein weiterer. Ohne gültigen Zugang und ohne zugeordneten Kurs gibt es keinen Lauf. Ein Lauf `vorlesung` überschreibt `last_run` nicht: Sein Ergebnis und seine Fehler stehen nur im Protokoll (und intern in `lastLectureRun`). Die Oberfläche zeigt den Anlass nicht und bekommt keine Zeile „Moodle wird geprüft …“.
 - **Angebot statt Wechsel:** Kein Weg setzt einer Session von selbst einen Satz. Das Angebot (22.7) übernimmt der Nutzer mit einem Klick, über `PATCH`.
 
 ### 22.7 Web (verbindliche Eckpunkte)
@@ -2594,10 +2803,13 @@ Keine Änderung am Worker. Für eine Session, die erst nach einigen Minuten Foli
 |---|---|---|---|
 | **F1** (Core + Schemas) | `DeckOptions`, `DeckOption`, `DeckUse`, `DeckSource`, `DeckLock` samt Beispielen. `GET /modules/{id}/deck-options` (22.2, 22.3). Regeln und Sperren für `PATCH /sessions/{id}` (22.4). Upload mit `session_id`: Zustand und Sperr-Reihenfolge (22.5). Nachträge in §7.2 und §15 | `packages/schemas/src/session.schema.json`, `packages/schemas/examples/**`, generierte Dateien, `services/core/src/services/sessions.ts`, neu `services/core/src/services/deck-options.ts`, `services/core/src/routes/{sessions,organisation}.ts`, in `services/core/src/services/material.ts` und `routes/material.ts` nur der Weg mit `session_id`, Tests (auch Nebenläufigkeit: `PATCH` gegen `slide.change`, `PATCH` gegen Upload, kein `40P01`), dieser Abschnitt | – |
 | **F2** (Web) | Start-Karte, spontaner Start, Live-Ansicht ohne und mit Satz, Upload auf der Modulseite (22.7) | `apps/web/src/components/today/{StartCard,SpontaneousStart}.tsx`, neu `apps/web/src/components/slides/DeckPicker.tsx`, `apps/web/src/components/dashboard/slides/**`, `apps/web/src/lib/{sessions,material}.ts`, `apps/web/src/lib/uploads.tsx`, in `MaterialPanel.tsx` nur das Feld „Für Vorlesung“, in `apps/web/test/fake-core.ts` nur die Routen aus 22.3 bis 22.5, Tests | F1 (gegen Beispiele und Fake-Core baubar, Merge nach F1) |
-| **F3** (Core, Moodle) | Abgleich zur Vorlesung: Wert `vorlesung` in `MoodleSyncTrigger`, die drei Anstöße (22.6) | `packages/schemas/src/moodle.schema.json` (nur der Enum-Wert), generierte Dateien, `services/core/src/moodle/**` (Einstieg für den Anstoß), in `services/core/src/services/sessions.ts` nur die Aufrufe nach dem Commit von Takt und Start, Anzeige des neuen Anlasses in der Web-App (`lib/moodle.ts`), Tests | F1 (gleiche Datei `sessions.ts`, darum nacheinander) |
+| **F3a** (Core, Moodle) | Interner Anlass `vorlesung` (`SyncTrigger`, `SyncRun`, **kein** Wert im Schema, kein Codegen). `MoodleSync.runForLecture` (gedeckt, angehängt, gestartet, gestoppt), `vorlesung` als schwächster Anlass, `last_run` bleibt, `lastLectureRun`. `activeCourseIdsOfModule` in `store.ts`. `LectureSync` mit Drossel (§17.8). Ändert noch kein Verhalten, weil niemand `LectureSync` aufruft | `services/core/src/moodle/sync.ts`, neu `services/core/src/moodle/lecture.ts`, in `services/core/src/moodle/store.ts` nur die neue Funktion `activeCourseIdsOfModule`, `services/core/test/unit/moodle-lecture.test.ts`, `services/core/test/unit/moodle-sync-queue.test.ts`, neu `services/core/test/integration/moodle-lecture-courses.test.ts` (nur Testfall 7 aus §17.8, die Kursabfrage gegen Postgres) | F1 |
+| **F3b** (Core, Takt) | `SessionTickResult` aus `runSessionTick`, `afterTick` in `startSessionTicker`, Verdrahtung in `buildApp` samt `BuildAppOptions.lectureSync` und `sessionTickIntervalMs` (§17.8). Damit laufen die drei Anlässe | in `services/core/src/services/sessions.ts` nur `runSessionTick`, `startSessionTicker` und ihre Typen, in `services/core/src/app.ts` nur die zwei Optionen, `LectureSync` anlegen und an den Takt geben, `services/core/test/integration/lecture-sync.test.ts` (alle Testfälle dort außer 7). `sessions.test.ts` bleibt unverändert: Es nutzt den Rückgabewert von `runSessionTick` nicht, und `SessionTicker.runOnce` liefert weiter `Promise<void>` | F3a |
 | **F4** (iPad, nur Tests) | Tests für `SessionFollower` und `InkLibraryService`: `session.updated` setzt, wechselt und leert `slide_deck_id` der laufenden Session | `apps/ipad/Tests/**` | – |
-| **F5** | Ende-zu-Ende-Test (Start mit Vorschlag, Wahl in der Live-Ansicht, Sperre nach dem ersten Wechsel), Nachtrag in `docs/anleitungen/`, Prüfliste für den Owner | `tests/`, `docs/anleitungen/` | F1 bis F3 |
+| **F5** | Ende-zu-Ende-Test (Start mit Vorschlag, Wahl in der Live-Ansicht, Sperre nach dem ersten Wechsel), Nachtrag in `docs/anleitungen/`, Prüfliste für den Owner | `tests/`, `docs/anleitungen/` | F1 bis F3b |
 
-**Review:** F1 und F3 durch einen frischen Opus-Subagent (Sperren, Zustandsautomat), F2 ebenfalls Opus (Logik am Start), F4 und F5 Sonnet.
+**Review:** F1, F3a und F3b durch einen frischen Opus-Subagent (Sperren, Zustandsautomat, Abgleich; Stufe A nach `KOLLABORATION.md` §4a), F2 ebenfalls Opus (Logik am Start), F4 und F5 Sonnet. Code für F3a und F3b schreibt Sonnet nach §17.8. Die Web-App und der Worker bekommen für F3 kein Ticket (§17.8, „Status und Oberfläche“).
+
+**Kriterien für F3a und F3b** (zusätzlich zu den Testfällen in §17.8): je `pnpm typecheck`, `pnpm lint`, `pnpm format:check` und die Tests des Core grün. Bei F3a zusätzlich `pnpm schemas:check`, ohne geänderte generierte Datei (F3a fasst `packages/schemas/**` nicht an).
 
 **Nur der Owner kann testen:** ob der Vorschlag im Alltag stimmt (22.2: Fassungen, Dozenten, die alles vorab hochladen), ob das Angebot aus Moodle im Hörsaal rechtzeitig kommt, und ob das iPad die Folien einer laufenden Vorlesung ohne Neustart zeigt.
