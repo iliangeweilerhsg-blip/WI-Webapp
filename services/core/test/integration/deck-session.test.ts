@@ -2,12 +2,13 @@
 // `slide_deck_id`, Upload mit `session_id` samt Sperrreihenfolge (kein 40P01).
 import { randomBytes } from 'node:crypto';
 import { createHash } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiErrorSchema, DeckOptionsSchema, SINGLE_USER_ID, SessionSchema, type SyncEvent } from '@sg/shared';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
 import { createSlideDeck } from '../../src/services/material.ts';
+import { purgeTrashItems } from '../../src/services/trash-ops.ts';
 import { setSessionEventPublisher } from '../../src/services/sessions.ts';
 import { startTestApp, type TestApp } from './helpers.ts';
 
@@ -336,6 +337,34 @@ describe('GET /modules/{id}/deck-options (§22.2, §22.3)', () => {
     expect(res).toMatchObject({ current_deck_id: null, lock: 'folienwechsel' });
   });
 
+  it.each(['beendet', 'verarbeitet', 'verpasst'])(
+    'abgeschlossene Session (%s) ohne Satz: kein Vorschlag, obwohl ein freier Satz da ist; lock abgeschlossen',
+    async (state) => {
+      const free = await mkDeck();
+      const ses = await mkSession({ state });
+      const res = await optionsOk(mod, ses);
+      expect(res.items.find((o) => o.deck.id === free)?.free).toBe(true);
+      expect(res.suggested_deck_id).toBeNull();
+      expect(res.current_deck_id).toBeNull();
+      expect(res.lock).toBe('abgeschlossen');
+      // Gegenprobe: dieselbe Lage in einer offenen Session ergibt den Vorschlag
+      const open = await mkSession({ state: 'bereit' });
+      expect((await optionsOk(mod, open)).suggested_deck_id).toBe(free);
+    },
+  );
+
+  it('Zeiger auf einen Satz eines anderen Moduls: current_deck_id null, Satz nicht in items, lock aus dem Zeiger', async () => {
+    const foreign = await mkDeck({ module: otherMod });
+    const own = await mkDeck();
+    const ses = await mkSession({ state: 'bereit', deck: foreign });
+    await mkSlideEvent(ses);
+    const res = await optionsOk(mod, ses);
+    expect(res.current_deck_id).toBeNull();
+    expect(res.items.map((o) => o.deck.id)).toEqual([own]);
+    expect(res.lock).toBe('folienwechsel');
+    expect(res.suggested_deck_id).toBe(own);
+  });
+
   it('lock: abgeschlossen (beendet, verarbeitet, verpasst), folienwechsel, sonst null; gelöschte slide_event zählen nicht', async () => {
     const deck = await mkDeck();
     for (const state of ['beendet', 'verarbeitet', 'verpasst']) {
@@ -601,11 +630,16 @@ describe('Upload mit session_id (§22.5)', () => {
     async (state) => {
       const ses = await mkSession({ state });
       const up = upload();
+      const decksDir0 = join(dataDir, 'media', 'decks');
+      const decksBefore = existsSync(decksDir0) ? readdirSync(decksDir0) : [];
       await expect(
         createSlideDeck(t.handle.db, dataDir, up, { moduleId: mod, sessionId: ses }),
       ).rejects.toMatchObject({ statusCode: 409, code: 'slide_deck_session_closed', details: { state } });
       expect(await t.handle.sql`SELECT 1 FROM slide_deck`).toHaveLength(0);
       expect(await t.handle.sql`SELECT 1 FROM job`).toHaveLength(0);
+      // Keine Datei im Satz-Ordner (nichts abgelegt, nichts liegen geblieben)
+      const decksDir = join(dataDir, 'media', 'decks');
+      expect(existsSync(decksDir) ? readdirSync(decksDir) : []).toEqual(decksBefore);
     },
   );
 
@@ -615,7 +649,8 @@ describe('Upload mit session_id (§22.5)', () => {
     await t.handle.sql`UPDATE slide_deck SET session_id = ${free} WHERE id = ${dead}`;
     const up = await put(free);
     expect((await sessionRow(free)).slide_deck_id).toBe(up.id);
-    expect(await deckHint(dead)).toBeNull();
+    // Der gelöschte alte Satz wird nicht angefasst, sein Hinweis bleibt (§22.1)
+    expect(await deckHint(dead)).toBe(free);
     expect(updatedFor(free)).toHaveLength(1);
 
     const dead2 = await mkDeck({ deleted: true });
@@ -881,5 +916,206 @@ describe('Nebenläufigkeit (§22.4, §22.5, §16.2)', () => {
       expect(errCode(pr)).toBe('slide_deck_session_closed');
       expect(row.slide_deck_id).toBeNull();
     }
+  });
+
+  // ---- Papierkorb, Session-Zeile, Modul löschen (Nacharbeit nach Review) ----------------------------
+
+  /** Wartet, bis `p` fertig ist oder ein Statement an einer Sperre hängt (alte, verklemmende Reihenfolge) */
+  async function settledOrBlocked(p: Promise<unknown>): Promise<void> {
+    let done = false;
+    void p.then(
+      () => (done = true),
+      () => (done = true),
+    );
+    await vi.waitFor(async () => expect(done || (await blockedCount()) >= 1).toBe(true), {
+      timeout: 5_000,
+      interval: 25,
+    });
+  }
+  const raceDir = '/tmp/sg-deck-session-race';
+  const raceFile = (content: string) => {
+    mkdirSync(join(raceDir, 'media', '.tmp'), { recursive: true });
+    const tmpPath = join(raceDir, 'media', '.tmp', `x-${randomBytes(4).toString('hex')}`);
+    writeFileSync(tmpPath, content);
+    return {
+      tmpPath,
+      size: content.length,
+      sha256: createHash('sha256').update(content).digest('hex'),
+      filename: 'x.pdf',
+    };
+  };
+  const raceUpload = (label: string) => raceFile(`%PDF-1.4 ${label} ${randomBytes(4).toString('hex')}`);
+
+  it('PATCH ‖ endgültiges Löschen des (gelöschten) alten Satzes: 200, kein 40P01, der gelöschte Satz wird nicht gesperrt', async () => {
+    const dead = await mkDeck({ deleted: true });
+    const b = await mkDeck();
+    const ses = await mkSession({ state: 'bereit', deck: dead });
+    await t.handle.sql`UPDATE slide_deck SET session_id = ${ses} WHERE id = ${dead}`;
+    const gate = await t.handle.sql.reserve();
+    let patched: Promise<{ statusCode: number }> | undefined;
+    let gateError: unknown = null;
+    try {
+      // Das endgültige Löschen: Satz `FOR UPDATE` (trash-ops), danach DELETE (FK `SET NULL` braucht die Session-Zeile)
+      await gate`BEGIN`;
+      await gate`SELECT id FROM slide_deck WHERE id = ${dead} FOR UPDATE`;
+      patched = patch(ses, { slide_deck_id: b });
+      await settledOrBlocked(patched);
+      try {
+        await gate`DELETE FROM slide_deck WHERE id = ${dead}`;
+        await gate`COMMIT`;
+      } catch (e) {
+        gateError = e;
+        await gate`ROLLBACK`.catch(() => undefined);
+      }
+    } finally {
+      await gate`ROLLBACK`.catch(() => undefined);
+      gate.release();
+    }
+    const [res] = await Promise.allSettled([patched]);
+    expect(errorCode(gateError)).toBeUndefined();
+    expect(res.status).toBe('fulfilled');
+    expect((res as PromiseFulfilledResult<{ statusCode: number }>).value.statusCode).toBe(200);
+    expect((await sessionRow(ses)).slide_deck_id).toBe(b);
+    expect(await t.handle.sql`SELECT 1 FROM slide_deck WHERE id = ${dead}`).toHaveLength(0);
+  });
+
+  it('PATCH ‖ endgültiges Löschen über purgeTrashItems: 200, kein 40P01', async () => {
+    const dead = await mkDeck({ deleted: true });
+    const b = await mkDeck();
+    const ses = await mkSession({ state: 'bereit', deck: dead });
+    const gate = await t.handle.sql.reserve();
+    let patched: Promise<{ statusCode: number }> | undefined;
+    let purged: Promise<unknown> | undefined;
+    try {
+      await gate`BEGIN`;
+      await gate`SELECT id FROM slide_deck WHERE id = ${dead} FOR UPDATE`;
+      patched = patch(ses, { slide_deck_id: b });
+      await settledOrBlocked(patched);
+      purged = purgeTrashItems(t.handle.db, raceDir, [{ kind: 'slide_deck', id: dead }]).catch(
+        (e: unknown) => e,
+      );
+      await gate`COMMIT`;
+    } finally {
+      await gate`ROLLBACK`.catch(() => undefined);
+      gate.release();
+    }
+    const [res, pr] = await Promise.allSettled([patched, purged]);
+    expect(res.status).toBe('fulfilled');
+    expect((res as PromiseFulfilledResult<{ statusCode: number }>).value.statusCode).toBe(200);
+    expect(pr.status).toBe('fulfilled');
+    expect((pr as PromiseFulfilledResult<unknown>).value).not.toBeInstanceOf(Error);
+    expect((await sessionRow(ses)).slide_deck_id).toBe(b);
+    expect(await t.handle.sql`SELECT 1 FROM slide_deck WHERE id = ${dead}`).toHaveLength(0);
+  });
+
+  it('PATCH leert den Zeiger auf einen gelöschten Satz, ohne ihn anzufassen (Hinweis bleibt)', async () => {
+    const dead = await mkDeck({ deleted: true });
+    const ses = await mkSession({ state: 'bereit', deck: dead });
+    await t.handle.sql`UPDATE slide_deck SET session_id = ${ses} WHERE id = ${dead}`;
+    const [before] = await t.handle.sql`SELECT updated_at FROM slide_deck WHERE id = ${dead}`;
+    expect((await patch(ses, { slide_deck_id: null })).statusCode).toBe(200);
+    expect((await sessionRow(ses)).slide_deck_id).toBeNull();
+    expect(await deckHint(dead)).toBe(ses);
+    const [after] = await t.handle.sql`SELECT updated_at FROM slide_deck WHERE id = ${dead}`;
+    expect(after?.updated_at).toEqual(before?.updated_at);
+  });
+
+  it('Upload mit Zeiger auf gelöschten Satz ‖ endgültiges Löschen dieses Satzes: kein 40P01, Upload hängt an', async () => {
+    const dead = await mkDeck({ deleted: true });
+    const ses = await mkSession({ state: 'bereit', deck: dead });
+    await t.handle.sql`UPDATE slide_deck SET session_id = ${ses} WHERE id = ${dead}`;
+    const gate = await t.handle.sql.reserve();
+    let uploading: Promise<unknown> | undefined;
+    let gateError: unknown = null;
+    try {
+      await gate`BEGIN`;
+      await gate`SELECT id FROM slide_deck WHERE id = ${dead} FOR UPDATE`;
+      uploading = createSlideDeck(t.handle.db, raceDir, raceUpload('purge'), {
+        moduleId: mod,
+        sessionId: ses,
+      }).catch((e: unknown) => e);
+      await settledOrBlocked(uploading);
+      try {
+        await gate`DELETE FROM slide_deck WHERE id = ${dead}`;
+        await gate`COMMIT`;
+      } catch (e) {
+        gateError = e;
+        await gate`ROLLBACK`.catch(() => undefined);
+      }
+    } finally {
+      await gate`ROLLBACK`.catch(() => undefined);
+      gate.release();
+    }
+    const [res] = await Promise.allSettled([uploading]);
+    expect(errorCode(gateError)).toBeUndefined();
+    expect(res.status).toBe('fulfilled');
+    const value = (res as PromiseFulfilledResult<{ id: string }>).value;
+    expect(value).not.toBeInstanceOf(Error);
+    expect((await sessionRow(ses)).slide_deck_id).toBe(value.id);
+    expect(await t.handle.sql`SELECT 1 FROM slide_deck WHERE id = ${dead}`).toHaveLength(0);
+  });
+
+  it('PATCH ‖ Schreiber ohne Zustandswechsel-Sperre (z. B. title-PATCH, hier mit Zustandswechsel): PATCH wartet auf die Session-Zeile und sieht den neuen Zustand', async () => {
+    const a = await mkDeck();
+    const ses = await mkSession({ state: 'laeuft' });
+    const gate = await t.handle.sql.reserve();
+    let patched: Promise<{ statusCode: number; json: () => unknown }> | undefined;
+    try {
+      // Hält nur die Session-Zeile, nicht `lockSessionTransitions`
+      await gate`BEGIN`;
+      await gate`UPDATE session SET state = 'beendet', ended_at = now(), stop_reason = 'manuell' WHERE id = ${ses}`;
+      patched = patch(ses, { slide_deck_id: a });
+      await waitForBlocked(1);
+      await gate`COMMIT`;
+    } finally {
+      await gate`ROLLBACK`.catch(() => undefined);
+      gate.release();
+    }
+    const [res] = await Promise.allSettled([patched]);
+    expect(res.status).toBe('fulfilled');
+    const r = (res as PromiseFulfilledResult<{ statusCode: number; json: () => unknown }>).value;
+    expect(r.statusCode).toBe(409);
+    expect(errCode(r)).toBe('slide_deck_session_closed');
+    expect((await sessionRow(ses)).slide_deck_id).toBeNull();
+  });
+
+  it('Upload mit session_id ‖ Modul löschen (Kaskade hält zuerst die Zustandswechsel-Sperre und die Sätze): kein 40P01', async () => {
+    // Vorhandener Satz mit gleichem Inhalt: Der Upload hängt ihn der Session an und aktualisiert dessen Hinweis
+    const content = `%PDF-1.4 dup ${randomBytes(4).toString('hex')}`;
+    const x = await createSlideDeck(t.handle.db, raceDir, raceFile(content), { moduleId: mod });
+    const ses = await mkSession({ state: 'bereit' });
+    const gate = await t.handle.sql.reserve();
+    let uploading: Promise<unknown> | undefined;
+    let gateError: unknown = null;
+    try {
+      // Kaskade (`softDeleteWithOps`): `lockSessionTransitions`, Sätze des Moduls, dann die Session-Zeilen
+      await gate`BEGIN`;
+      await gate`SELECT pg_advisory_xact_lock(hashtextextended('sg:session-transition', 0))`;
+      await gate`SELECT id FROM slide_deck WHERE id = ${x.id} FOR NO KEY UPDATE`;
+      uploading = createSlideDeck(t.handle.db, raceDir, raceFile(content), {
+        moduleId: mod,
+        sessionId: ses,
+      }).catch((e: unknown) => e);
+      await waitForBlocked(1);
+      try {
+        await gate`UPDATE session SET deleted_at = now() WHERE id = ${ses}`;
+        await gate`COMMIT`;
+      } catch (e) {
+        gateError = e;
+        await gate`ROLLBACK`.catch(() => undefined);
+      }
+    } finally {
+      await gate`ROLLBACK`.catch(() => undefined);
+      gate.release();
+    }
+    const [res] = await Promise.allSettled([uploading]);
+    expect(errorCode(gateError)).toBeUndefined();
+    expect(res.status).toBe('fulfilled');
+    // Die Kaskade war zuerst: Die Session ist gelöscht, der Upload scheitert sauber
+    expect((res as PromiseFulfilledResult<unknown>).value).toMatchObject({
+      statusCode: 404,
+      code: 'session_not_found',
+    });
+    expect((await sessionRow(ses)).slide_deck_id).toBeNull();
   });
 });

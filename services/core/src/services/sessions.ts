@@ -416,7 +416,8 @@ export async function attachDeckToSession(tx: Tx, sessionId: string, deckId: str
     .update(session)
     .set({ slideDeckId: deckId, updatedAt: bumpedAt() })
     .where(eq(session.id, sessionId));
-  if (pointer) await unlinkDeckFromSession(tx, pointer, sessionId);
+  // Der alte Satz ist hier immer gelöscht (sonst `attach = false`): Er wird nicht angefasst, ein gleichzeitiges
+  // endgültiges Löschen verklemmte sich sonst mit dieser Session-Zeile (§22.5).
   await emitUpdated(tx, sessionId);
 }
 
@@ -1150,7 +1151,8 @@ export async function createSession(tx: Tx, input: SessionCreateInput): Promise<
  *
  * Nur `title`: keine der Sperren, in jedem Zustand. Mit `slide_deck_id`: Sperrreihenfolge (§16.2)
  * `lockSessionTransitions` → Session-Zeile `FOR NO KEY UPDATE` → `sync_stream` von `session:<id>` (hält ein gleichzeitiges
- * `slide.change` zurück) → `slide_event` zählen → `slide_deck`-Zeilen (alter und neuer Satz, nach `id` aufsteigend).
+ * `slide.change` zurück) → `slide_event` zählen → `slide_deck`-Zeilen (alter und neuer Satz, nach `id` aufsteigend, **nur nicht gelöschte**: ein gelöschter
+ * alter Satz wird weder gesperrt noch angefasst, §22.1).
  */
 export async function updateSession(
   tx: Tx,
@@ -1173,6 +1175,7 @@ export async function updateSession(
 
   const current = row.slideDeckId;
   const next = patch.slide_deck_id;
+  let lockedDeckIds: string[] = [];
   if (next !== undefined && next !== current) {
     if ((CLOSED_SESSION_STATES as readonly string[]).includes(row.state)) throw deckSessionClosed(row.state);
     await lockSessionStream(tx, id);
@@ -1181,12 +1184,15 @@ export async function updateSession(
     const ids = [current, next].filter((x): x is string => typeof x === 'string').sort();
     const decks = ids.length
       ? await tx
-          .select({ id: slideDeck.id, moduleId: slideDeck.moduleId, deletedAt: slideDeck.deletedAt })
+          .select({ id: slideDeck.id, moduleId: slideDeck.moduleId })
           .from(slideDeck)
-          .where(inArray(slideDeck.id, ids))
+          // Nur nicht gelöschte Sätze sperren: Ein gelöschter Satz kann gleichzeitig endgültig gelöscht werden, und
+          // dessen FK `ON DELETE SET NULL` braucht diese Session-Zeile (sonst 40P01). Er wird nicht angefasst (§22.1).
+          .where(and(inArray(slideDeck.id, ids), notDeleted(slideDeck)))
           .orderBy(asc(slideDeck.id))
           .for('no key update')
       : [];
+    lockedDeckIds = decks.map((d) => d.id);
     if (current && events > 0) {
       throw new HttpError(
         409,
@@ -1197,7 +1203,7 @@ export async function updateSession(
     }
     if (next) {
       const deck = decks.find((d) => d.id === next);
-      if (!deck || deck.deletedAt) {
+      if (!deck) {
         throw new HttpError(404, 'slide_deck_not_found', 'Der Foliensatz wurde nicht gefunden.');
       }
       if (deck.moduleId !== row.moduleId) {
@@ -1216,7 +1222,8 @@ export async function updateSession(
       .set({ ...set, updatedAt: bumpedAt() })
       .where(eq(session.id, id));
     if (set.slideDeckId !== undefined) {
-      if (current) await unlinkDeckFromSession(tx, current, id);
+      // Nur ein gesperrter (nicht gelöschter) alter Satz verliert den Hinweis; ein gelöschter bleibt unberührt
+      if (current && lockedDeckIds.includes(current)) await unlinkDeckFromSession(tx, current, id);
       if (set.slideDeckId) await linkDeckToSession(tx, set.slideDeckId, id);
     }
     await emitUpdated(tx, id);
