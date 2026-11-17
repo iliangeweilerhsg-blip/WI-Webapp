@@ -99,6 +99,7 @@ export const stroke = pgTable(
       .default(sql`'{1,0,0,1,0,0}'`),
     bbox: jsonb('bbox').$type<number[]>().notNull(),
     points: bytea('points').notNull(), // 24 Byte je Punkt (08 §4.2)
+    sizes: bytea('sizes'), // Format v2 (VERTRAEGE §23): 8 Byte je Punkt (width, height). NULL = Format v1
     clockUncertain: boolean('clock_uncertain').notNull().default(false),
   },
   (t) => [
@@ -106,6 +107,11 @@ export const stroke = pgTable(
     check('stroke_tool_chk', sql`${t.tool} IN ('pen','pencil','marker','monoline','fountain')`),
     check('stroke_layer_chk', sql`${t.layer} IN ('ink','highlight')`),
     check('stroke_transform_chk', sql`cardinality(${t.transform}) = 6`),
+    // sizes gehört zu points: genau 8 Byte je Punkt, also ein Drittel der Länge von points (24 Byte je Punkt)
+    check(
+      'stroke_sizes_chk',
+      sql`${t.sizes} IS NULL OR octet_length(${t.sizes}) * 3 = octet_length(${t.points})`,
+    ),
   ],
 );
 

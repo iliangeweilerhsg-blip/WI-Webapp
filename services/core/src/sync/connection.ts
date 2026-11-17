@@ -560,6 +560,8 @@ export class SyncConnection {
       db_epoch: dbEpoch,
       device_id: this.deviceId,
       resume,
+      // Fähigkeiten des Core (VERTRAEGE §23.4): Das iPad sendet `Stroke.sizes` nur, wenn `stroke_sizes` dabei ist
+      features: ['stroke_sizes'],
     });
     this.hub.broadcastEvent(
       {

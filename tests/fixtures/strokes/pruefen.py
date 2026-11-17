@@ -10,6 +10,9 @@ Prüft für jede JSON-Datei in `tests/fixtures/strokes/`:
 - `t_end_ms - t_start_ms` ≈ letzter `dt` (±5 ms) bzw. beide `null` bei Strichen ohne Session
 - `client_id` ist eine gültige UUIDv7 (RFC 9562) und pro Datei eindeutig
 - Packen und Entpacken (`pack_points` / `unpack_points`) ist Float32-genau identisch (Roundtrip)
+- Optionales `sizes` (Format v2, VERTRAEGE §23): gültiges Base64 (mit Padding wo nötig), 8 Byte je Punkt und genau so
+  viele Einträge wie `points`, Werte endlich und >= 0, mindestens ein Wert > 0, `width` = Median von `max(width, height)`,
+  Roundtrip (`pack_sizes` / `unpack_sizes`) identisch, `points` und `sizes` zusammen höchstens 750 000 Byte
 
 Ausführung:
     python3 tests/fixtures/strokes/pruefen.py
@@ -26,12 +29,16 @@ from pathlib import Path
 
 from stroke_format import (
     POINT_BYTE_SIZE,
+    SIZE_BYTE_SIZE,
     VALID_LAYERS,
     VALID_TOOLS,
     apply_transform,
     is_valid_uuid7,
+    median_width,
     pack_points,
+    pack_sizes,
     unpack_points,
+    unpack_sizes,
 )
 
 FIXTURES_DIR = Path(__file__).resolve().parent
@@ -49,6 +56,41 @@ REQUIRED_KEYS = {
     "bbox",
     "points",
 }
+OPTIONAL_KEYS = {"sizes"}
+MAX_STROKE_BYTES = 750_000
+
+
+def check_sizes(prefix: str, stroke: dict, points: list, width: float) -> list[str]:
+    """Prüft `sizes` eines Strichs gegen `points` und `width` (VERTRAEGE §23.2, §23.3)."""
+    errors: list[str] = []
+    b64 = stroke["sizes"]
+    if not isinstance(b64, str) or not b64:
+        return [f"{prefix}: sizes muss ein nicht-leerer Base64-String sein (nie null oder leer)."]
+    try:
+        raw = base64.b64decode(b64, validate=True)
+    except Exception as exc:
+        return [f"{prefix}: sizes Base64-Dekodierung fehlgeschlagen: {exc}"]
+    if len(raw) != len(points) * SIZE_BYTE_SIZE:
+        return [
+            f"{prefix}: sizes hat {len(raw)} Byte, erwartet {len(points)} Punkte x {SIZE_BYTE_SIZE} = {len(points) * SIZE_BYTE_SIZE}."
+        ]
+    if "\n" in b64 or " " in b64:
+        errors.append(f"{prefix}: sizes enthält Leerraum oder Zeilenumbrüche.")
+    sizes = unpack_sizes(b64)
+    if pack_sizes(sizes) != b64:
+        errors.append(f"{prefix}: sizes Pack/Unpack-Roundtrip ist nicht Float32-identisch.")
+    if any(math.isnan(v) or math.isinf(v) or v < 0 for pair in sizes for v in pair):
+        errors.append(f"{prefix}: sizes enthält NaN, Inf oder negative Werte.")
+    elif not any(v > 0 for pair in sizes for v in pair):
+        errors.append(f"{prefix}: sizes besteht nur aus Nullen.")
+    lower, upper = median_width(sizes)
+    if not (lower - 0.02 <= float(width) <= upper + 0.02):
+        errors.append(
+            f"{prefix}: width={width} ist nicht der Median von max(width, height) der Punkte ({lower:.3f} bis {upper:.3f})."
+        )
+    if len(points) * POINT_BYTE_SIZE + len(raw) > MAX_STROKE_BYTES:
+        errors.append(f"{prefix}: points und sizes zusammen über {MAX_STROKE_BYTES} Byte.")
+    return errors
 
 
 def validate_file(json_path: Path) -> tuple[list[str], int, int]:
@@ -72,7 +114,7 @@ def validate_file(json_path: Path) -> tuple[list[str], int, int]:
             continue
 
         missing = REQUIRED_KEYS - set(stroke.keys())
-        extra = set(stroke.keys()) - REQUIRED_KEYS
+        extra = set(stroke.keys()) - REQUIRED_KEYS - OPTIONAL_KEYS
         if missing:
             errors.append(f"{prefix}: Fehlende Pflichtfelder: {sorted(missing)}")
             continue
@@ -195,6 +237,10 @@ def validate_file(json_path: Path) -> tuple[list[str], int, int]:
             tx, ty = apply_transform(px, py, transform)
             tx_list.append(tx)
             ty_list.append(ty)
+
+        # 7b. Optionales `sizes` (Format v2)
+        if "sizes" in stroke:
+            errors.extend(check_sizes(prefix, stroke, points, width))
 
         # 8. t_end_ms - t_start_ms ≈ letzter dt (±5 ms)
         last_dt = points[-1][2]

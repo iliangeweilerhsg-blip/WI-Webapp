@@ -269,6 +269,7 @@ final class InkOpBuilderTests: XCTestCase {
             createdAt: 10_000,
             layer: .ink,
             points: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            sizes: nil,
             tEndMS: tStart.map { $0 + 500 },
             tStartMS: tStart,
             tool: .pen,
@@ -642,6 +643,7 @@ final class InkReconcilerTests: XCTestCase {
     ) -> Stroke {
         Stroke(
             bbox: [0, 0, 1, 1], clientID: id, color: color, createdAt: 1, layer: .ink, points: points,
+            sizes: nil,
             tEndMS: nil, tStartMS: nil, tool: .pen, transform: transform, width: width)
     }
 

@@ -26,10 +26,13 @@ import {
   makeOp,
   nbStream,
   notebookCreateData,
+  packSizes,
   pageCreateData,
+  pointCount,
   runHandler,
   seedModule,
   seedSession,
+  zeroPoints,
   type Seed,
 } from './ink-helpers.ts';
 import { testDatabaseUrl } from './helpers.ts';
@@ -286,6 +289,10 @@ describe('stroke.add / stroke.remove', () => {
         );
         expect(row?.createdAt.getTime()).toBe(s.created_at);
         expect(Buffer.from(row?.points ?? []).toString('base64')).toBe(s.points);
+        // Format v2: sizes als Bytes gespeichert, Format v1: Spalte NULL
+        expect(row?.sizes === null ? undefined : Buffer.from(row?.sizes ?? []).toString('base64')).toBe(
+          s.sizes,
+        );
       }
     },
   );
@@ -380,6 +387,156 @@ describe('stroke.add / stroke.remove', () => {
     const rows = await handle.db.select().from(stroke).where(eq(stroke.pageId, pageId));
     expect(rows.find((r) => r.clientId === a.client_id)?.deletedAt).not.toBeNull();
     expect(rows.find((r) => r.clientId === b.client_id)?.deletedAt).toBeNull();
+  });
+});
+
+describe('stroke.add mit sizes (Format v2, VERTRAEGE §23.6)', () => {
+  /** Zeile des Strichs: `sizes` als Base64 (oder `null`) und ob die Spalte wirklich SQL-NULL ist */
+  async function sizesColumn(pageId: string) {
+    const [row] = await handle.sql<{ sizes: string | null; is_null: boolean }[]>`
+      SELECT translate(encode(sizes, 'base64'), E'\n', '') AS sizes, sizes IS NULL AS is_null FROM stroke WHERE page_id = ${pageId}`;
+    return row;
+  }
+
+  /** Strich aus Datei 01 (v1) mit `sizes` für alle Punkte, `value` je Breite und Höhe */
+  function v2(value = 3): Stroke {
+    const s = sample();
+    const n = pointCount(s);
+    return { ...s, sizes: packSizes(Array.from({ length: n }, () => [value, value] as const)) };
+  }
+
+  it('ohne sizes wie bisher: Spalte ist NULL', async () => {
+    const { pageId, stream } = await seedPage();
+    await run(addStroke(stream, pageId, sample()));
+    expect(await sizesColumn(pageId)).toEqual({ sizes: null, is_null: true });
+  });
+
+  it('mit sizes: als Bytes gespeichert, Base64 kommt unverändert zurück', async () => {
+    const { pageId, stream } = await seedPage();
+    const s = v2(4.5);
+    await run(addStroke(stream, pageId, s));
+    const row = await sizesColumn(pageId);
+    expect(row?.is_null).toBe(false);
+    expect(row?.sizes).toBe(s.sizes);
+    const [raw] = await handle.db
+      .select({ sizes: stroke.sizes })
+      .from(stroke)
+      .where(eq(stroke.pageId, pageId));
+    expect(raw?.sizes).toHaveLength(pointCount(s) * 8);
+  });
+
+  it('Upsert ohne sizes auf einen Strich mit sizes: die Spalte ist danach NULL (in der Datenbank geprüft)', async () => {
+    const { pageId, stream } = await seedPage();
+    const s = v2();
+    await run(addStroke(stream, pageId, s));
+    expect((await sizesColumn(pageId))?.is_null).toBe(false);
+    const { sizes: _sizes, ...v1 } = s;
+    await run(addStroke(stream, pageId, { ...v1, transform: [1, 0, 0, 1, 50, 20], bbox: [60, 30, 10, 10] }));
+    expect(await sizesColumn(pageId)).toEqual({ sizes: null, is_null: true });
+    // Der Rest des Upserts wurde übernommen: Es ist derselbe Strich, kein zweiter
+    const rows = await handle.db.select().from(stroke).where(eq(stroke.pageId, pageId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.transform).toEqual([1, 0, 0, 1, 50, 20]);
+  });
+
+  it('Upsert mit sizes auf einen v1-Strich setzt sie; ein zweiter Upsert mit anderen sizes ersetzt sie', async () => {
+    const { pageId, stream } = await seedPage();
+    await run(addStroke(stream, pageId, sample()));
+    const first = v2(2);
+    await run(addStroke(stream, pageId, first));
+    expect((await sizesColumn(pageId))?.sizes).toBe(first.sizes);
+    const second = v2(6);
+    await run(addStroke(stream, pageId, second));
+    expect((await sizesColumn(pageId))?.sizes).toBe(second.sizes);
+  });
+
+  describe('lehnt ab (message_invalid, nicht wiederholbar)', () => {
+    const n = pointCount(sample());
+    const filled = (value: number, count = n) =>
+      packSizes(Array.from({ length: count }, () => [value, value] as const));
+    const withValue = (index: number, value: number) => {
+      const list: (readonly [number, number])[] = Array.from({ length: n }, () => [3, 3] as const);
+      list[index] = [3, value];
+      return packSizes(list);
+    };
+    const cases: [string, unknown][] = [
+      ['leer', ''],
+      ['kein Base64', '###notbase64###'],
+      ['Länge kein Vielfaches von 4 Zeichen', 'AAA'],
+      ['null statt Schlüssel', null],
+      ['keine Zeichenkette', 42],
+      ['ein Punkt zu wenig', filled(3, n - 1)],
+      ['ein Punkt zu viel', filled(3, n + 1)],
+      ['7 Byte statt 8 Byte je Punkt', Buffer.alloc(n * 8 - 1).toString('base64')],
+      ['NaN', withValue(2, Number.NaN)],
+      ['Unendlich', withValue(0, Number.POSITIVE_INFINITY)],
+      ['minus Unendlich', withValue(1, Number.NEGATIVE_INFINITY)],
+      ['negativer Wert', withValue(n - 1, -0.5)],
+      ['lauter Nullen', filled(0)],
+    ];
+    it.each(cases)('%s', async (_name, sizes) => {
+      const { pageId, stream } = await seedPage();
+      const error = await failure(run(addStroke(stream, pageId, { ...sample(), sizes } as Stroke)));
+      expect(error).toMatchObject({ code: 'message_invalid', retryable: false });
+      expect(await handle.db.select().from(stroke).where(eq(stroke.pageId, pageId))).toHaveLength(0);
+    });
+
+    it('ein einzelner Wert größer als 0 genügt, 0 ist sonst erlaubt (auslaufende Spitze)', async () => {
+      const { pageId, stream } = await seedPage();
+      const list: (readonly [number, number])[] = Array.from({ length: n }, () => [0, 0] as const);
+      list[n - 2] = [0, 1.5];
+      await run(addStroke(stream, pageId, { ...sample(), sizes: packSizes(list) }));
+      expect((await sizesColumn(pageId))?.is_null).toBe(false);
+    });
+
+    it('ein abgelehnter Upsert lässt den gespeicherten Strich mit sizes unverändert', async () => {
+      const { pageId, stream } = await seedPage();
+      const s = v2();
+      await run(addStroke(stream, pageId, s));
+      const error = await failure(run(addStroke(stream, pageId, { ...s, sizes: filled(0) })));
+      expect(error.code).toBe('message_invalid');
+      expect((await sizesColumn(pageId))?.sizes).toBe(s.sizes);
+    });
+  });
+
+  describe('Grenze: points und sizes zusammen höchstens 750 000 Byte', () => {
+    const strokeOf = (count: number, withSizes: boolean): Stroke => ({
+      ...sample(),
+      points: zeroPoints(count),
+      ...(withSizes ? { sizes: packSizes(Array.from({ length: count }, () => [1, 1] as const)) } : {}),
+    });
+
+    it('23 437 Punkte mit sizes (749 984 Byte) werden angenommen', async () => {
+      const { pageId, stream } = await seedPage();
+      await run(addStroke(stream, pageId, strokeOf(23_437, true)));
+      const [row] = await handle.db.select().from(stroke).where(eq(stroke.pageId, pageId));
+      expect(row?.points).toHaveLength(23_437 * 24);
+      expect(row?.sizes).toHaveLength(23_437 * 8);
+    });
+
+    it('23 438 Punkte mit sizes (750 016 Byte) werden abgelehnt', async () => {
+      const { pageId, stream } = await seedPage();
+      const error = await failure(run(addStroke(stream, pageId, strokeOf(23_438, true))));
+      expect(error).toMatchObject({ code: 'message_invalid', retryable: false });
+      expect(await handle.db.select().from(stroke).where(eq(stroke.pageId, pageId))).toHaveLength(0);
+    });
+
+    it('31 250 Punkte ohne sizes (750 000 Byte) werden weiter angenommen, 31 251 nicht', async () => {
+      const { pageId, stream } = await seedPage();
+      await run(addStroke(stream, pageId, strokeOf(31_250, false)));
+      expect((await sizesColumn(pageId))?.is_null).toBe(true);
+      const error = await failure(run(addStroke(stream, pageId, strokeOf(31_251, false))));
+      expect(error.code).toBe('message_invalid');
+    });
+  });
+
+  it('die Datenbank sichert die Zuordnung zusätzlich: sizes mit falscher Länge verletzt den CHECK', async () => {
+    const { pageId, stream } = await seedPage();
+    await run(addStroke(stream, pageId, sample()));
+    await expect(
+      handle.sql`UPDATE stroke SET sizes = ${Buffer.alloc(8 * pointCount(sample()) + 8)} WHERE page_id = ${pageId}`,
+    ).rejects.toMatchObject({ constraint_name: 'stroke_sizes_chk' });
+    await handle.sql`UPDATE stroke SET sizes = ${Buffer.alloc(8 * pointCount(sample()))} WHERE page_id = ${pageId}`;
   });
 });
 

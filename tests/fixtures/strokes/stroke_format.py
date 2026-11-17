@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Referenz-Packer, -Entpacker und Hilfsfunktionen für das neutrale Strich-Format (08 §4.1 / §4.2).
+"""Referenz-Packer, -Entpacker und Hilfsfunktionen für das neutrale Strich-Format (08 §4.1 / §4.2, `sizes` nach VERTRAEGE §23).
 
 Verwendet ausschließlich die Python-Standardbibliothek (`struct`, `base64`, `json`, `uuid`).
 """
@@ -15,11 +15,14 @@ from typing import Iterable, Sequence
 
 POINT_STRUCT = struct.Struct("<6f")
 POINT_BYTE_SIZE = POINT_STRUCT.size  # 24 Bytes (6 * Float32 little-endian)
+SIZE_STRUCT = struct.Struct("<2f")
+SIZE_BYTE_SIZE = SIZE_STRUCT.size  # 8 Bytes je Punkt in `sizes`: width, height (Format v2, VERTRAEGE §23.2)
 
 VALID_TOOLS = frozenset({"pen", "pencil", "marker", "monoline", "fountain"})
 VALID_LAYERS = frozenset({"ink", "highlight"})
 
 PointTuple = tuple[float, float, float, float, float, float]
+SizeTuple = tuple[float, float]
 
 
 def pack_points(points: Iterable[Sequence[float]]) -> str:
@@ -40,6 +43,31 @@ def unpack_points(b64: str) -> list[PointTuple]:
             f"Dekodierte Punkt-Bytelänge ({len(raw)}) ist kein Vielfaches von {POINT_BYTE_SIZE} Byte."
         )
     return list(POINT_STRUCT.iter_unpack(raw))
+
+
+def pack_sizes(sizes: Iterable[Sequence[float]]) -> str:
+    """Packt die Größe je Punkt (width, height in pt) als Base64-String (2 x Float32 LE, 8 Byte je Punkt, mit Padding wo nötig)."""
+    buf = bytearray()
+    for size in sizes:
+        if len(size) != 2:
+            raise ValueError(f"Jede Größe muss genau 2 Werte haben, erhalten: {len(size)}")
+        buf.extend(SIZE_STRUCT.pack(float(size[0]), float(size[1])))
+    return base64.b64encode(bytes(buf)).decode("ascii")
+
+
+def unpack_sizes(b64: str) -> list[SizeTuple]:
+    """Entpackt `sizes` in eine Liste von (width, height) in Float32-Präzision."""
+    raw = base64.b64decode(b64, validate=True)
+    if len(raw) % SIZE_BYTE_SIZE != 0:
+        raise ValueError(f"Dekodierte Größen-Bytelänge ({len(raw)}) ist kein Vielfaches von {SIZE_BYTE_SIZE} Byte.")
+    return list(SIZE_STRUCT.iter_unpack(raw))
+
+
+def median_width(sizes: Sequence[Sequence[float]]) -> tuple[float, float]:
+    """Unterer und oberer Median von max(width, height) über die Punkte (bei ungerader Anzahl identisch)."""
+    values = sorted(max(float(w), float(h)) for w, h in sizes)
+    n = len(values)
+    return values[(n - 1) // 2], values[n // 2]
 
 
 def uuid7_from_rng(timestamp_ms: int, rng: random.Random) -> str:
@@ -109,12 +137,18 @@ __all__ = [
     "POINT_BYTE_SIZE",
     "POINT_STRUCT",
     "PointTuple",
+    "SIZE_BYTE_SIZE",
+    "SIZE_STRUCT",
+    "SizeTuple",
     "VALID_LAYERS",
     "VALID_TOOLS",
     "apply_transform",
     "compute_bbox",
     "is_valid_uuid7",
+    "median_width",
     "pack_points",
+    "pack_sizes",
     "unpack_points",
+    "unpack_sizes",
     "uuid7_from_rng",
 ]

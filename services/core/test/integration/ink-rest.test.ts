@@ -339,6 +339,7 @@ describe('Seiten und Striche lesen', () => {
     for (const got of body.strokes) {
       const want = byId.get(got.client_id) as Stroke;
       expect(got.points).toBe(want.points);
+      expect(got.sizes).toBe(want.sizes);
       expect(got.created_at).toBe(want.created_at);
       expect(got.t_start_ms).toBe(want.t_start_ms);
       expect(got.bbox).toEqual(want.bbox);
@@ -347,6 +348,37 @@ describe('Seiten und Striche lesen', () => {
     }
     const times = body.strokes.map((s) => s.created_at);
     expect(times).toEqual([...times].sort((x, y) => x - y));
+  });
+
+  it('GET /pages/{id}/strokes: sizes nur bei Strichen im Format v2, bei v1 fehlt der Schlüssel (nie null)', async () => {
+    const { b, stream } = await seedPages();
+    const v1 = (loadStrokeFixtures()[0] as { strokes: Stroke[] }).strokes[0] as Stroke;
+    const fixture08 = loadStrokeFixtures().find((f) => f.file.startsWith('08-')) as { strokes: Stroke[] };
+    const v2 = fixture08.strokes[0] as Stroke;
+    expect(v2.sizes).toEqual(expect.any(String));
+    for (const s of [v1, v2]) {
+      await runHandler(
+        t.handle.db,
+        t.config.dataDir,
+        makeOp('stroke.add', stream, { page_id: b.page_id, stroke: s }),
+      );
+    }
+    const res = await json('GET', `/pages/${b.page_id}/strokes`);
+    const raw = (res.json() as { strokes: Record<string, unknown>[] }).strokes;
+    const byId = new Map(raw.map((s) => [s.client_id, s]));
+    expect(Object.hasOwn(byId.get(v1.client_id) as object, 'sizes')).toBe(false);
+    expect(byId.get(v2.client_id)?.sizes).toBe(v2.sizes);
+    // Ein Upsert des v2-Strichs ohne sizes macht ihn wieder zu v1 (der Schlüssel fehlt, nicht null)
+    const { sizes: _sizes, ...asV1 } = v2;
+    await runHandler(
+      t.handle.db,
+      t.config.dataDir,
+      makeOp('stroke.add', stream, { page_id: b.page_id, stroke: asV1 }),
+    );
+    const again = (
+      (await json('GET', `/pages/${b.page_id}/strokes`)).json() as { strokes: Record<string, unknown>[] }
+    ).strokes.find((s) => s.client_id === v2.client_id);
+    expect(Object.hasOwn(again as object, 'sizes')).toBe(false);
   });
 
   it('entfernte Striche erscheinen nicht mehr in GET /pages/{id}/strokes', async () => {

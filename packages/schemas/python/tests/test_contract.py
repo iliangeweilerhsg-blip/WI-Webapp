@@ -23,7 +23,29 @@ def test_valid(name: str, type_name: str, data: object) -> None:
     TypeAdapter(getattr(models, type_name)).validate_python(data)
 
 
-@pytest.mark.parametrize(("name", "type_name", "data"), _cases("invalid"))
+# Bekannte Lücken der generierten Pydantic-Modelle (datamodel-code-generator, VERTRAEGE §23.5): JSON Schema und Zod
+# lehnen diese Beispiele ab, Pydantic nicht. Ein optionales Feld nimmt dort `None` an (das Schema verbietet `null`),
+# und `uniqueItems` wird nicht abgebildet. Der Core und das Web prüfen strenger (Zod, Handler). Die Worker lesen
+# `Stroke` und `SyncWelcome` nicht. `strict=True`: Behebt ein neuer Codegen die Lücke, schlägt der Test an und der Eintrag fliegt raus.
+PYDANTIC_LENIENT = {
+    "Stroke.sizes-null.json": "optionales Feld nimmt None an, das Schema verbietet null",
+    "SyncWelcome.features-doppelt.json": "uniqueItems wird von Pydantic nicht geprüft",
+}
+
+
+def _invalid_params() -> list[object]:
+    params: list[object] = []
+    for name, type_name, data in _cases("invalid"):
+        marks = (
+            [pytest.mark.xfail(strict=True, raises=pytest.fail.Exception, reason=PYDANTIC_LENIENT[name])]
+            if name in PYDANTIC_LENIENT
+            else []
+        )
+        params.append(pytest.param(name, type_name, data, marks=marks, id=f"{name}-{type_name}"))
+    return params
+
+
+@pytest.mark.parametrize(("name", "type_name", "data"), _invalid_params())
 def test_invalid(name: str, type_name: str, data: object) -> None:
     with pytest.raises(ValidationError):
         TypeAdapter(getattr(models, type_name)).validate_python(data)

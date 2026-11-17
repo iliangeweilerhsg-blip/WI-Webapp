@@ -12,6 +12,7 @@ final class InkReconcilerProjectionTests: XCTestCase {
             createdAt: 1_762_246_500_000,
             layer: .ink,
             points: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            sizes: nil,
             tEndMS: nil,
             tStartMS: nil,
             tool: .pen,

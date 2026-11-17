@@ -132,6 +132,8 @@ describe('Anmeldung (§11.1)', () => {
       device_id: null,
       server_version: expect.any(String),
       resume: [],
+      // Fähigkeiten des Core (VERTRAEGE §23.4)
+      features: ['stroke_sizes'],
     });
     expect(Math.abs((welcome.server_time as number) - Date.now())).toBeLessThan(5000);
 
@@ -767,6 +769,33 @@ describe('Operationen, ack und Duplikate (§11.2, §16.2)', () => {
     );
     const rows = await app.handle.sql`SELECT client_id, deleted_at FROM stroke WHERE page_id = ${pc.page_id}`;
     expect(rows).toEqual([{ client_id: stroke.client_id, deleted_at: null }]);
+  });
+
+  it('stroke.add mit sizes: gespeichert, im Strom unverändert, dieselbe op_id ist idempotent (VERTRAEGE §23.6)', async () => {
+    const { moduleId } = await seedModule(app.handle.db);
+    const nb = notebookCreateData(moduleId);
+    const stream = `notebook:${nb.notebook_id}`;
+    const pc = pageCreateData(nb.notebook_id);
+    const fixture08 = loadStrokeFixtures().find((f) => f.file.startsWith('08-'))!;
+    const stroke = structuredClone(fixture08.strokes[0]!);
+    expect(stroke.sizes).toEqual(expect.any(String));
+    const client = await ready();
+    const add = makeOp('stroke.add', stream, { page_id: pc.page_id, stroke });
+    const ops = [makeOp('notebook.create', stream, nb), makeOp('page.create', stream, pc), add, add];
+    for (const op of ops) client.send(op);
+    await waitFor(() => client.of('ack').length === 4 || client.of('error').length > 0, 10_000, 'acks');
+    expect(client.of('error')).toEqual([]);
+    const acks = client.of('ack');
+    // Die Wiederholung bekommt dieselbe seq und legt keine zweite Operation an
+    expect(acks[3]).toEqual({ type: 'ack', op_id: add.op_id, stream, seq: 3 });
+    expect(acks[2]).toEqual(acks[3]);
+    expect(await storedOps(stream)).toBe(3);
+    const stored = await app.handle.sql`SELECT data FROM sync_op WHERE op_id = ${add.op_id}`;
+    expect(stored).toHaveLength(1);
+    expect(stored[0]!.data.stroke.sizes).toBe(stroke.sizes);
+    const rows = await app.handle
+      .sql`SELECT translate(encode(sizes, 'base64'), E'\n', '') AS sizes FROM stroke WHERE page_id = ${pc.page_id}`;
+    expect(rows).toEqual([{ sizes: stroke.sizes }]);
   });
 
   it('too_many_pending: frühere Operationen laufen durch, dann error und 4503', async () => {

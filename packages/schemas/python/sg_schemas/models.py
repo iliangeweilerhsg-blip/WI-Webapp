@@ -1766,6 +1766,10 @@ class SyncUnsubscribe(BaseModel):
     streams: list[SyncStreamId] = Field(..., min_length=1)
 
 
+class Feature(RootModel[StrictStr]):
+    root: StrictStr = Field(..., min_length=1)
+
+
 class TextBlock(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -5805,7 +5809,7 @@ class StampElementPayload(BaseModel):
 
 class Stroke(BaseModel):
     """
-    Neutrales Strich-Format (08 §4.1/4.2). points sind Rohkoordinaten VOR transform, bbox gilt NACH transform inklusive halber Breite. dt des ersten Punkts ist 0; t_end_ms − t_start_ms entspricht dem letzten dt. t_start_ms/t_end_ms null außerhalb einer Session.
+    Neutrales Strich-Format (08 §4.1/4.2). points sind Rohkoordinaten VOR transform, bbox gilt NACH transform inklusive halber Breite. dt des ersten Punkts ist 0; t_end_ms − t_start_ms entspricht dem letzten dt. t_start_ms/t_end_ms null außerhalb einer Session. Optional sizes: Breite und Höhe je Punkt (Format v2, VERTRAEGE §23); fehlt es, ist der Strich im Format v1.
     """
 
     model_config = ConfigDict(
@@ -5847,8 +5851,14 @@ class Stroke(BaseModel):
     )
     points: StrictStr = Field(
         ...,
-        description='Base64 (ohne Zeilenumbrüche) von n ≥ 1 Punkten à 24 Byte: x, y, dt, force, azimuth, altitude als Float32 little-endian (08 §4.2). 24 Byte = genau 32 Base64-Zeichen, daher nie Padding',
+        description='Base64 (ohne Zeilenumbrüche) von n ≥ 1 Punkten à 24 Byte: x, y, dt, force, azimuth, altitude als Float32 little-endian (08 §4.2). 24 Byte = genau 32 Base64-Zeichen, daher nie Padding. Die Breite je Punkt steht in sizes (Format v2, VERTRAEGE §23), points bleibt dafür unverändert',
         pattern='^(?:[A-Za-z0-9+/]{32})+$',
+    )
+    sizes: StrictStr | None = Field(
+        None,
+        description='Optional (Format v2, VERTRAEGE §23.2): Breite und Höhe je Punkt als Base64 (ohne Zeilenumbrüche), je Punkt zwei Float32 little-endian (width, height) in pt, vor transform, also 8 Byte je Punkt. Der i-te Eintrag gehört zum i-ten Punkt in points, die Anzahl ist gleich. Werte endlich und ≥ 0, mindestens einer > 0. Padding (=) ist erlaubt, wo Base64 es verlangt. Fehlt das Feld, ist der Strich im Format v1. Nie null. Ob sizes zur Punktzahl passt, prüfen Core und Web, nicht das Schema',
+        min_length=12,
+        pattern='^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$',
     )
 
 
@@ -6185,6 +6195,10 @@ class SyncWelcome(BaseModel):
     )
     device_id: Uuid | None
     resume: list[SyncResume]
+    features: list[Feature] | None = Field(
+        None,
+        description='Optional: Fähigkeiten des Core (VERTRAEGE §23.4). Fehlt das Feld, gilt es als leer. Bekannt: stroke_sizes (Core nimmt Stroke.sizes an). Clients ignorieren unbekannte Einträge',
+    )
 
 
 class SystemPower(BaseModel):

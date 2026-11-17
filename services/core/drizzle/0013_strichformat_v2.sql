@@ -1,0 +1,2 @@
+ALTER TABLE "stroke" ADD COLUMN "sizes" "bytea";--> statement-breakpoint
+ALTER TABLE "stroke" ADD CONSTRAINT "stroke_sizes_chk" CHECK ("stroke"."sizes" IS NULL OR octet_length("stroke"."sizes") * 3 = octet_length("stroke"."points"));
