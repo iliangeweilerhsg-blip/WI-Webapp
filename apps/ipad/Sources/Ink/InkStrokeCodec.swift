@@ -83,7 +83,8 @@ enum InkStrokeCodec {
     /// Grenze beim Senden (#382, VERTRAEGE §23.3): 29 000 Punkte sind 928 000 Zeichen Base64, mit Umschlag unter
     /// 950 000 Byte, auch nach der Zeitkorrektur. Längere Striche werden gleichmäßig ausgedünnt.
     static let maxPointsSent = 29_000
-    /// `sizes` nur bis zu dieser Punktzahl (VERTRAEGE §23.3, Regel 1): 20 000 Punkte sind 853 336 Zeichen Base64
+    /// `sizes` nur bis zu dieser Punktzahl (VERTRAEGE §23.3, Regel 1): 20 000 Punkte sind
+    /// für `points` und `sizes` zusammen 853 336 Zeichen Base64
     static let maxPointsWithSizes = 20_000
 
     static let identityTransform: [Double] = [1, 0, 0, 1, 0, 0]

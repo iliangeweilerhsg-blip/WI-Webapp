@@ -31,7 +31,10 @@ final class FakePairedMacStore: PairedMacStore {
     }
 
     func loadPairedMac() -> PairedMac? { mac }
-    func savePairedMac(_ mac: PairedMac) { self.mac = mac }
+    func savePairedMac(_ mac: PairedMac) {
+        self.mac = mac
+        strokeSizes = false
+    }
     func clearPairedMac() {
         mac = nil
         strokeSizes = false

@@ -350,14 +350,15 @@ final class StrokeSizesCapabilityTests: XCTestCase {
         XCTAssertFalse(h.engine.strokeSizesSupported)
     }
 
-    func testDefaultsStoreKeepsItAcrossInstancesAndClearsItWithThePairing() {
+    func testDefaultsStoreKeepsItAcrossInstancesAndClearsItWithThePairing() throws {
         // Ein neuer Wert-Typ liest dieselben UserDefaults wie nach einem Neustart der App
         let key = "pairedMac.strokeSizes"
         let saved = DefaultsPairedMacStore().loadPairedMac()
         let before = UserDefaults.standard.object(forKey: key)
         defer {
+            // Erst die Kopplung zurückschreiben (sie löscht die Fähigkeit), dann den alten Wert der Fähigkeit
+            if let saved { DefaultsPairedMacStore().savePairedMac(saved) } else { DefaultsPairedMacStore().clearPairedMac() }
             if let before { UserDefaults.standard.set(before, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) }
-            if let saved { DefaultsPairedMacStore().savePairedMac(saved) }
         }
         let store = DefaultsPairedMacStore()
         store.clearPairedMac()
@@ -370,6 +371,14 @@ final class StrokeSizesCapabilityTests: XCTestCase {
         XCTAssertNil(UserDefaults.standard.object(forKey: key))
         store.setStrokeSizes(false)
         XCTAssertFalse(DefaultsPairedMacStore().strokeSizes)
+        // Neues Koppeln (auch ohne vorheriges Entkoppeln, z. B. nach einer Wiederherstellung ohne Schlüsselbund):
+        // Die Fähigkeit des alten Macs gilt nicht weiter
+        store.setStrokeSizes(true)
+        let mac = PairedMac(
+            endpoint: try XCTUnwrap(CoreEndpoint(host: "mac.local", port: 4710)), deviceID: "dev-neu", deviceName: "iPad")
+        store.savePairedMac(mac)
+        XCTAssertFalse(DefaultsPairedMacStore().strokeSizes)
+        XCTAssertNil(UserDefaults.standard.object(forKey: key))
     }
 }
 

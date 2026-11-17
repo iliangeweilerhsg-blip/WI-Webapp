@@ -254,7 +254,7 @@ final class InkStrokeCodecTests: XCTestCase {
         }
         // Vier Byte sind nur eine halbe Größe
         XCTAssertThrowsError(try InkStrokeCodec.unpackSizes("AAAAQA==")) { error in
-            XCTAssertEqual(error as? InkCodecError, .badLength(5))
+            XCTAssertEqual(error as? InkCodecError, .badLength(4))
         }
     }
 
@@ -367,7 +367,8 @@ final class InkStrokeCodecTests: XCTestCase {
         let at = try XCTUnwrap(
             InkStrokeCodec.encode(sample(points: sizedPoints(limit)), clientID: "id", options: sizesOn))
         let text = try XCTUnwrap(at.sizes)
-        XCTAssertEqual(text.count, 853_336)
+        // 20 000 × 8 Byte = 160 000 Byte, in Base64 213 336 Zeichen (mit `points` zusammen 853 336)
+        XCTAssertEqual(text.count, 213_336)
         XCTAssertEqual(try InkStrokeCodec.unpackSizes(text).count, limit)
 
         let over = try XCTUnwrap(

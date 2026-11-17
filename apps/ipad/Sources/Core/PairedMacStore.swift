@@ -44,6 +44,8 @@ struct DefaultsPairedMacStore: PairedMacStore {
         defaults.set(mac.endpoint.port, forKey: Self.portKey)
         defaults.set(mac.deviceID, forKey: Self.deviceIDKey)
         defaults.set(mac.deviceName, forKey: Self.deviceNameKey)
+        // Die Fähigkeit gilt je gekoppeltem Mac (VERTRAEGE §23.7): ein neuer Mac meldet sie erst mit seinem `welcome`
+        defaults.removeObject(forKey: Self.strokeSizesKey)
     }
 
     func clearPairedMac() {
