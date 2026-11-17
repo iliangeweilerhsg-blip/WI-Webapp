@@ -271,8 +271,8 @@ final class SlideSupport {
 
     /// Aktuelle Folie des Mac. Lädt den Foliensatz bei Bedarf (nur den der laufenden Session).
     /// Wechselt der Satz während des Ladens (`session.updated`), wird die Folie nie aus dem alten Satz geliefert:
-    /// Die Auflösung beginnt mit dem neuen Satz von vorn, höchstens `maxAttempts`-mal, danach `nil`. Die Aufrufer
-    /// (`followSlideIfNeeded`, `SlideBackgroundModel`) öffnen oder zeigen genau diese Folie, darum ist die Folie des
+    /// Die Auflösung beginnt mit dem neuen Satz von vorn, höchstens `maxAttempts`-mal, danach `nil`. Der Aufrufer
+    /// (`followSlideIfNeeded` in `InkPageView`) öffnet genau diese Folie, darum ist die Folie des
     /// neuen Satzes besser als `nil`; `nil` bleibt nur, wenn der Satz auch danach nicht stillsteht.
     func currentSlide() async -> SlideRef? {
         let maxAttempts = 3
