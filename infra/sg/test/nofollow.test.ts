@@ -441,15 +441,17 @@ describe('PID-Datei eines Laufs (liveness)', () => {
 
   it('H2: verwaiste Dateien toter Prozesse werden aufgeräumt, lebende und der eigene bleiben', () => {
     const dataDir = tmp();
-    writeRunPid(dataDir, 'backup-a', 'a', 2001);
-    writeRunPid(dataDir, 'backup-b', 'b', 2002);
+    // PIDs aus der echten abgeleitet: sie sind der eigenen nie gleich (sonst bliebe eine „tote“ Datei liegen)
+    const [p1, p2, p3] = [process.pid + 1, process.pid + 2, process.pid + 3];
+    writeRunPid(dataDir, 'backup-a', 'a', p1);
+    writeRunPid(dataDir, 'backup-b', 'b', p2);
     writeRunPid(dataDir, 'restore-test', 'T', process.pid);
-    writeFileSync(join(dataDir, 'tmp', 'lauf-kaputt.2003.json'), 'x');
+    writeFileSync(join(dataDir, 'tmp', `lauf-kaputt.${p3}.json`), 'x');
     writeFileSync(join(dataDir, 'tmp', 'anderes.json'), 'x');
-    expect(sweepDeadRunPids(dataDir, (pid) => pid === 2002)).toBe(2);
+    expect(sweepDeadRunPids(dataDir, (pid) => pid === p2)).toBe(2);
     expect(readdirSync(join(dataDir, 'tmp')).sort()).toEqual([
       'anderes.json',
-      `lauf-backup-b.2002.json`,
+      `lauf-backup-b.${p2}.json`,
       `lauf-restore-test.${process.pid}.json`,
     ]);
   });
