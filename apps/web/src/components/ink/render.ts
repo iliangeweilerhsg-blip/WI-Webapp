@@ -39,12 +39,17 @@ interface ToolStyle {
   alpha: number;
   /** Konische Enden in Vielfachen der Breite (0 = keine) */
   taper: number;
+  /**
+   * Schätzung für v1-Striche (VERTRAEGE §23.8, V2-5): Druck = `0,5 × force / Median`, auf `[min, max]` begrenzt.
+   * `null` = `force` geht unverändert ein (Monoline und Textmarker, dort ist der Durchmesser schon `width`).
+   */
+  pressure: { min: number; max: number } | null;
 }
 
 export const TOOL_STYLES: Record<DecodedStroke['tool'], ToolStyle> = {
   // Kugelschreiber/Fineliner: gleichmäßig, leichte Druckreaktion
   pen: {
-    size: 0.6,
+    size: 1.0,
     thinning: 0.85,
     smoothing: 0.55,
     streamline: 0.35,
@@ -52,10 +57,11 @@ export const TOOL_STYLES: Record<DecodedStroke['tool'], ToolStyle> = {
     cap: true,
     alpha: 1,
     taper: 0,
+    pressure: { min: 0.3, max: 0.7 },
   },
   // Füller: starke Druckvariation, auslaufende Enden
   fountain: {
-    size: 0.58,
+    size: 1.0,
     thinning: 1,
     smoothing: 0.6,
     streamline: 0.35,
@@ -63,10 +69,11 @@ export const TOOL_STYLES: Record<DecodedStroke['tool'], ToolStyle> = {
     cap: true,
     alpha: 1,
     taper: 1.2,
+    pressure: { min: 0, max: 1 },
   },
   // Bleistift: weicher, etwas durchscheinend
   pencil: {
-    size: 0.65,
+    size: 1.0,
     thinning: 0.7,
     smoothing: 0.5,
     streamline: 0.4,
@@ -74,6 +81,7 @@ export const TOOL_STYLES: Record<DecodedStroke['tool'], ToolStyle> = {
     cap: true,
     alpha: 0.88,
     taper: 0,
+    pressure: { min: 0, max: 1 },
   },
   // Monoline: konstante Breite, runde Enden
   monoline: {
@@ -85,6 +93,7 @@ export const TOOL_STYLES: Record<DecodedStroke['tool'], ToolStyle> = {
     cap: true,
     alpha: 1,
     taper: 0,
+    pressure: null,
   },
   // Textmarker: konstante Breite, stumpfe Enden, Deckkraft kommt aus der Farbe (#RRGGBBAA)
   marker: {
@@ -96,6 +105,7 @@ export const TOOL_STYLES: Record<DecodedStroke['tool'], ToolStyle> = {
     cap: false,
     alpha: 1,
     taper: 0,
+    pressure: null,
   },
 };
 
@@ -107,15 +117,46 @@ function styleOf(d: DecodedStroke): ToolStyle {
 type Outline = readonly number[][];
 const outlines = new WeakMap<DecodedStroke, Outline>();
 
+/**
+ * Druck je Punkt für `perfect-freehand` (VERTRAEGE §23.8, V2-5, eine SCHÄTZUNG für Striche ohne `sizes`).
+ * Bekannt ist nur, dass `width` der Median des echten Durchmessers ist; der Maßstab von `force` ist unbekannt
+ * (der Teiler am iPad ist geraten). Darum wird der Druck am Median `m` von `force` (Punkte mit `force > 0`) verankert:
+ * `clamp(0,5 × force / m, min, max)`. Beim mittleren Druck ist der Strich so genau `width` breit, geschätzt bleibt nur
+ * die Schwankung darum. Ohne Punkt mit `force > 0` ist der Druck überall 0,5. Werkzeuge ohne Schätzung: `force` pur.
+ */
+function pressureOf(d: DecodedStroke, s: ToolStyle): Float32Array {
+  const out = new Float32Array(d.count);
+  const range = s.pressure;
+  if (!range) {
+    for (let i = 0; i < d.count; i++) out[i] = Math.min(1, Math.max(0, d.pts[i * DECODED_STRIDE + 2]!));
+    return out;
+  }
+  const pos: number[] = [];
+  for (let i = 0; i < d.count; i++) {
+    const f = d.pts[i * DECODED_STRIDE + 2]!;
+    if (f > 0) pos.push(f);
+  }
+  if (pos.length === 0) return out.fill(0.5);
+  pos.sort((a, b) => a - b);
+  const mid = pos.length >> 1;
+  const m = pos.length % 2 ? pos[mid]! : (pos[mid - 1]! + pos[mid]!) / 2;
+  for (let i = 0; i < d.count; i++) {
+    const p = (0.5 * d.pts[i * DECODED_STRIDE + 2]!) / m;
+    out[i] = Math.min(range.max, Math.max(range.min, p));
+  }
+  return out;
+}
+
 /** Umriss eines Strichs in Seitenkoordinaten. Wird je Strich einmal berechnet. */
 export function strokeOutline(d: DecodedStroke): Outline {
   let o = outlines.get(d);
   if (o) return o;
   const s = styleOf(d);
+  const press = pressureOf(d, s);
   const input: number[][] = [];
   for (let i = 0; i < d.count; i++) {
     const o5 = i * DECODED_STRIDE;
-    input.push([d.pts[o5]!, d.pts[o5 + 1]!, Math.min(1, Math.max(0, d.pts[o5 + 2]!))]);
+    input.push([d.pts[o5]!, d.pts[o5 + 1]!, press[i]!]);
   }
   const floor = s.floor;
   const taper = s.taper * d.width;
@@ -466,10 +507,46 @@ function drawShape2(ctx: CanvasRenderingContext2D, d: DecodedStroke): void {
   ctx.fill('nonzero');
 }
 
+/** Alle Punkte (auch mehrere) liegen auf einem Fleck, wie bei v2 (Punkte unter `MERGE_DIST` werden zusammengefasst). */
+function isSinglePoint(d: DecodedStroke): boolean {
+  if (d.count < 1) return false;
+  const x = d.pts[0]!;
+  const y = d.pts[1]!;
+  for (let i = 1; i < d.count; i++) {
+    if (Math.hypot(d.pts[i * DECODED_STRIDE]! - x, d.pts[i * DECODED_STRIDE + 1]! - y) >= MERGE_DIST)
+      return false;
+  }
+  return true;
+}
+
+/** v1-Strich aus einem einzigen Punkt: Scheibe mit Durchmesser `width`, beim Textmarker (stumpf) ein Quadrat. */
+function drawDot(ctx: CanvasRenderingContext2D, d: DecodedStroke): void {
+  const r = d.width / 2;
+  const x = d.pts[0]!;
+  const y = d.pts[1]!;
+  ctx.fillStyle = rgba(d.color, d.color.a * styleOf(d).alpha);
+  ctx.beginPath();
+  if (styleOf(d).cap) {
+    ctx.moveTo(x + r, y);
+    ctx.arc(x, y, r, 0, Math.PI * 2, false);
+  } else {
+    ctx.moveTo(x - r, y - r);
+    ctx.lineTo(x + r, y - r);
+    ctx.lineTo(x + r, y + r);
+    ctx.lineTo(x - r, y + r);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
 /** Zeichnet einen Strich als gefüllten, geglätteten Umriss (ein Pfad, damit Transparenz nicht doppelt deckt). */
 export function drawStroke(ctx: CanvasRenderingContext2D, d: DecodedStroke): void {
   if (d.diam) {
     drawShape2(ctx, d);
+    return;
+  }
+  if (isSinglePoint(d)) {
+    drawDot(ctx, d);
     return;
   }
   const pts = strokeOutline(d);
