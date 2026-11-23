@@ -304,13 +304,46 @@ function filterSql(filters: ResolvedFilters): SQL {
 const hasFilter = (filters: ResolvedFilters): boolean =>
   filters.kinds.length > 0 || filters.moduleIds !== null;
 
+/**
+ * Planer-Einstellungen für die beiden Abfragen, die bei großem Bestand fast jede Zeile von `search_chunk` anfassen
+ * (#334): Der Planer kennt die Kosten nicht, `tsv` (und `embedding`) aus TOAST zu holen, und wählt für häufige Begriffe
+ * einen Seq Scan auf einer einzigen Verbindung. Parallele Worker verteilen das Auspacken auf mehrere Kerne. Die
+ * Ergebnisse bleiben gleich (nur der Plan ändert sich). `SET LOCAL` gilt nur bis zum Ende der Transaktion.
+ */
+const PARALLEL_SETTINGS = [
+  'SET LOCAL parallel_setup_cost = 0',
+  'SET LOCAL parallel_tuple_cost = 0',
+  'SET LOCAL min_parallel_table_scan_size = 0',
+  'SET LOCAL min_parallel_index_scan_size = 0',
+] as const;
+
+/**
+ * Wortsuche zusätzlich ohne Seq Scan: Über den GIN-Index (Bitmap Heap Scan) wird `tsv` nur einmal ausgepackt. Beim
+ * Seq Scan geschähe das zweimal, einmal für `@@` und einmal für `ts_rank_cd`. Ohne passenden Index bleibt der Seq Scan
+ * möglich (`enable_seqscan = off` verteuert ihn nur).
+ */
+const TEXT_SETTINGS = ['SET LOCAL enable_seqscan = off', ...PARALLEL_SETTINGS] as const;
+
+async function withSettings<T>(
+  db: Db,
+  settings: readonly string[],
+  fn: (tx: Pick<Db, 'execute'>) => Promise<T>,
+): Promise<T> {
+  return db.transaction(async (tx) => {
+    for (const setting of settings) await tx.execute(sql.raw(setting));
+    return fn(tx);
+  });
+}
+
 /** Wortsuche: die besten `CANDIDATES` nach `ts_rank_cd` (Gleichstand nach ID) */
 async function textCandidates(db: Db, tsText: string, filters: ResolvedFilters): Promise<string[]> {
-  const rows = await db.execute<{ id: string }>(
-    sql`SELECT c.id FROM ${FROM_CHUNKS}
+  const rows = await withSettings(db, TEXT_SETTINGS, (tx) =>
+    tx.execute<{ id: string }>(
+      sql`SELECT c.id FROM ${FROM_CHUNKS}
         WHERE ${filterSql(filters)} AND c.tsv @@ ${tsQuery(tsText)}
         ORDER BY ts_rank_cd(c.tsv, ${tsQuery(tsText)}) DESC, c.id
         LIMIT ${CANDIDATES}`,
+    ),
   );
   return rows.map((r) => r.id);
 }
@@ -345,7 +378,7 @@ async function vectorCandidates(
   const maxDistance = 1 - MIN_VECTOR_SIM;
   const query = vectorQuery(vector, model, filters);
   const rows = hasFilter(filters)
-    ? await db.execute<{ id: string; dist: number }>(query)
+    ? await withSettings(db, PARALLEL_SETTINGS, (tx) => tx.execute<{ id: string; dist: number }>(query))
     : await db.transaction(async (tx) => {
         await tx.execute(sql.raw(`SET LOCAL hnsw.ef_search = ${HNSW_EF_SEARCH}`));
         return tx.execute<{ id: string; dist: number }>(query);
