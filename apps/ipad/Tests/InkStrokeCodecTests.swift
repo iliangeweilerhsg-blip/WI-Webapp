@@ -277,7 +277,14 @@ final class InkStrokeCodecTests: XCTestCase {
         XCTAssertEqual(withSizes.transform, plain.transform)
         XCTAssertEqual(withSizes.tStartMS, plain.tStartMS)
         XCTAssertEqual(withSizes.tEndMS, plain.tEndMS)
-        XCTAssertEqual(try SGSync.encode(withSizes.with(sizes: .some(nil))), try SGSync.encode(plain))
+        // Inhaltlich vergleichen: `SGSync.encoder()` sortiert die Schlüssel nicht, die Reihenfolge ist nicht stabil
+        let strippedData: Data = try SGSync.encode(withSizes.with(sizes: .some(nil)))
+        let plainData: Data = try SGSync.encode(plain)
+        XCTAssertEqual(strippedData.count, plainData.count)
+        let strippedJSON = try JSONSerialization.jsonObject(with: strippedData) as? NSDictionary
+        let plainJSON = try JSONSerialization.jsonObject(with: plainData) as? NSDictionary
+        XCTAssertNotNil(plainJSON)
+        XCTAssertEqual(strippedJSON, plainJSON)
         // Auch `includeSizes = true` ohne Größen in der Erfassung ändert `points` nicht
         let noSizes = try XCTUnwrap(InkStrokeCodec.encode(sample(), clientID: "id", options: sizesOn))
         XCTAssertEqual(noSizes.points, try XCTUnwrap(InkStrokeCodec.encode(sample(), clientID: "id")).points)

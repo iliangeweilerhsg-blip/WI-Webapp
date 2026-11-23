@@ -125,7 +125,11 @@ final class InkStrokeSizesOpTests: XCTestCase {
         // `build` nimmt `big` mit `sizes` und liefert dieselbe Operation wie der Strich, der gar keine `sizes` hatte
         let withSizes = try XCTUnwrap(build(big))
         let plain = try XCTUnwrap(build(big.with(sizes: .some(nil))))
-        XCTAssertEqual(withSizes.json, plain.json, "ohne `sizes` neu gebaut")
+        // Inhaltlich gleich und gleich lang; die Schlüsselreihenfolge von `SGSync.encoder()` ist nicht stabil
+        XCTAssertEqual(withSizes.json.utf8.count, plain.json.utf8.count, "ohne `sizes` neu gebaut")
+        let withSizesJSON: NSDictionary = try wire(withSizes.json) as NSDictionary
+        let plainJSON: NSDictionary = try wire(plain.json) as NSDictionary
+        XCTAssertEqual(withSizesJSON, plainJSON, "ohne `sizes` neu gebaut")
 
         let json = try wire(withSizes.json)
         let sent = try wireStroke(withSizes.json)
