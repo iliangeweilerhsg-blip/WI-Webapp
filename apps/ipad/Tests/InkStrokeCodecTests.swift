@@ -22,10 +22,13 @@ final class InkStrokeCodecTests: XCTestCase {
 
     /// n Punkte mit wechselnder Breite und Höhe (immer > 0)
     private func sizedPoints(_ count: Int) -> [InkPointSample] {
-        (0..<count).map { index in
-            point(
-                Double(index % 500), Double(index / 500), t: Double(index) * 0.004, force: 1,
-                width: 1 + Double(index % 7) * 0.5, height: 2 + Double(index % 5) * 0.25)
+        (0..<count).map { (index: Int) -> InkPointSample in
+            let x: Double = Double(index % 500)
+            let y: Double = Double(index / 500)
+            let time: Double = Double(index) * 0.004
+            let width: Double = 1.0 + Double(index % 7) * 0.5
+            let height: Double = 2.0 + Double(index % 5) * 0.25
+            return point(x, y, t: time, force: 1, width: width, height: height)
         }
     }
 

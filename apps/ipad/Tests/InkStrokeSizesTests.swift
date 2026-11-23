@@ -73,10 +73,13 @@ final class InkStrokeSizesOpTests: XCTestCase {
     // MARK: Regel 2: Größe der Operation (§23.3)
 
     func testTwentyThousandPointsWithSizesStayBelowTheLimitEvenAfterCorrection() throws {
-        let points = (0..<20_000).map { index in
-            InkPointSample(
-                x: Double(index % 500), y: Double(index / 500), timeOffset: Double(index) * 0.004,
-                force: 1, azimuth: 0.5, altitude: 1.0, width: 1 + Double(index % 7) * 0.5, height: 2)
+        let points: [InkPointSample] = (0..<20_000).map { (index: Int) -> InkPointSample in
+            let x: Double = Double(index % 500)
+            let y: Double = Double(index / 500)
+            let time: Double = Double(index) * 0.004
+            let width: Double = 1.0 + Double(index % 7) * 0.5
+            return InkPointSample(
+                x: x, y: y, timeOffset: time, force: 1, azimuth: 0.5, altitude: 1.0, width: width, height: 2)
         }
         let encoded = try XCTUnwrap(
             InkStrokeCodec.encode(
