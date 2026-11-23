@@ -1,6 +1,6 @@
 // B4 (VERTRAEGE §21.7, §21.10): Karten in der Konzeptansicht, Kartenvorschläge in der Inbox, Schrittliste und
 // Heute-Kachel gegen den Fake-Core. Alle Karten, Konzepte und Quellen sind erfunden.
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
@@ -113,6 +113,16 @@ function batchItem(overrides: Partial<InboxItem> = {}, conceptId = C_3NF): Inbox
 const rowOf = (itemId: string) =>
   document.querySelector<HTMLElement>(`[data-inbox-item="${itemId}"]`) as HTMLElement;
 const inboxPosts = () => core.requests.filter((r) => r.method === 'POST' && r.path.startsWith('/inbox'));
+
+// Feste Uhr: Die Testdaten stammen von Anfang November 2026. Die Inbox legt Einträge, die älter als
+// 14 Tage sind, in einen eingeklappten Bereich – mit echter Uhr kippen die Tests ab dem 19.11.2026.
+// Nur Date wird gefälscht, Timer laufen echt (findBy…/waitFor bleiben unberührt).
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-12T12:00:00Z') });
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 beforeEach(() => {
   window.history.replaceState(null, '', '/');

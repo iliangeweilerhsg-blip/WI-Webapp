@@ -1,6 +1,6 @@
 // T2-23 (VERTRAEGE §20.10): Inbox der Vorschläge, Zähler in der Navigation, Bibliothek und Konzeptansicht,
 // Einstellungen → KI. Alle Konzepte, Namen und Sätze sind erfunden.
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
@@ -160,6 +160,16 @@ const rowOf = (itemId: string) =>
   document.querySelector<HTMLElement>(`[data-inbox-item="${itemId}"]`) as HTMLElement;
 const posts = () => core.requests.filter((r) => r.method === 'POST' && r.path.startsWith('/inbox'));
 const toast = () => screen.getByTestId('toast-live');
+
+// Feste Uhr: Die Testdaten stammen von Anfang November 2026. Die Inbox legt Einträge, die älter als
+// 14 Tage sind, in einen eingeklappten Bereich – mit echter Uhr kippen die Tests ab dem 19.11.2026.
+// Nur Date wird gefälscht, Timer laufen echt (findBy…/waitFor bleiben unberührt).
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-12T12:00:00Z') });
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 beforeEach(() => {
   nav.replace.mockClear();
