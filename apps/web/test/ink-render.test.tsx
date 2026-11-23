@@ -1508,29 +1508,45 @@ function coveredArea(calls: CanvasLog['calls']): number {
       }
     }
   }
-  const xs = polys.flat().map((p) => p[0]);
-  const ys = polys.flat().map((p) => p[1]);
-  if (xs.length === 0) return 0;
+  const pts = polys.flat();
+  if (pts.length === 0) return 0;
+  let x0 = Infinity,
+    x1 = -Infinity,
+    y0 = Infinity,
+    y1 = -Infinity;
+  for (const [px, py] of pts) {
+    x0 = Math.min(x0, px);
+    x1 = Math.max(x1, px);
+    y0 = Math.min(y0, py);
+    y1 = Math.max(y1, py);
+  }
   const step = 0.05;
-  const x0 = Math.min(...xs);
-  const y0 = Math.min(...ys);
   let n = 0;
-  for (let y = y0 + step / 2; y < Math.max(...ys); y += step) {
-    for (let x = x0 + step / 2; x < Math.max(...xs); x += step) {
-      let wind = 0;
-      for (const poly of polys) {
-        for (let i = 0; i < poly.length; i++) {
-          const [px, py] = poly[i]!;
-          const [qx, qy] = poly[(i + 1) % poly.length]!;
-          if (
-            py <= y
-              ? qy > y && (qx - px) * (y - py) - (x - px) * (qy - py) > 0
-              : qy <= y && (qx - px) * (y - py) - (x - px) * (qy - py) < 0
-          )
-            wind += py <= y ? 1 : -1;
+  // Scanline: dieselben Abtastpunkte und dieselbe Nonzero-Winding-Regel wie ein Test Punkt für Punkt, aber
+  // pro Zeile werden nur die Schnittpunkte der Kanten berechnet (sonst Punkte × Kanten, in CI > 20 s, #398).
+  // Eine Kante zählt für x, wenn x links vom Schnittpunkt liegt; aufwärts +1, abwärts −1.
+  const cross: [number, number][] = [];
+  for (let y = y0 + step / 2; y < y1; y += step) {
+    cross.length = 0;
+    let total = 0;
+    for (const poly of polys) {
+      for (let i = 0; i < poly.length; i++) {
+        const [px, py] = poly[i]!;
+        const [qx, qy] = poly[(i + 1) % poly.length]!;
+        const up = py <= y && qy > y;
+        if (up || (py > y && qy <= y)) {
+          const dir = up ? 1 : -1;
+          cross.push([px + ((y - py) * (qx - px)) / (qy - py), dir]);
+          total += dir;
         }
       }
-      if (wind !== 0) n++;
+    }
+    cross.sort((a, b) => a[0] - b[0]);
+    let k = 0;
+    let passed = 0; // Summe der Richtungen aller Schnittpunkte links von x oder auf x
+    for (let x = x0 + step / 2; x < x1; x += step) {
+      while (k < cross.length && cross[k]![0] <= x) passed += cross[k++]![1];
+      if (total - passed !== 0) n++;
     }
   }
   return n * step * step;
