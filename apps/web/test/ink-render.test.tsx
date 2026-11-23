@@ -1380,6 +1380,76 @@ describe('V2-5: v1-Strich aus einem einzigen Punkt', () => {
     expect(vi.mocked(getStroke).mock.calls.length).toBe(before);
   });
 
+  /** Punkte (x, y) mit Druck 0,3, Werkzeug wie `dot`, Breite `width` */
+  function tapped(tool: Stroke['tool'], pts: readonly (readonly [number, number])[], width = 6): Stroke {
+    const s = dot(tool, pts.length, width);
+    const buf = Buffer.alloc(pts.length * 24);
+    pts.forEach(([x, y], i) => {
+      buf.writeFloatLE(x, i * 24);
+      buf.writeFloatLE(y, i * 24 + 4);
+      buf.writeFloatLE(i, i * 24 + 8);
+      buf.writeFloatLE(0.3, i * 24 + 12);
+    });
+    return { ...s, points: buf.toString('base64') } as Stroke;
+  }
+
+  it('#390: getipptes Füller-Pünktchen mit Zittern (3 Punkte in 0,3 pt) wird zur vollen Scheibe, in der Mitte der Punkte', () => {
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    const before = vi.mocked(getStroke).mock.calls.length;
+    log.reset();
+    drawStroke(
+      ctx,
+      decodeStroke(
+        tapped('fountain', [
+          [20, 30],
+          [20.2, 30.1],
+          [20.3, 29.9],
+        ]),
+      ),
+    );
+    expect(log.count('arc')).toBe(1);
+    const [x, y, r] = log.calls.find((c) => c.name === 'arc')!.args as number[];
+    expect(r).toBe(3); // Durchmesser width = 6: 100 % der Scheibe, nicht 0 %
+    expect(Math.hypot(x! - 20.15, y! - 30)).toBeLessThan(0.2);
+    expect(log.fills).toHaveLength(1);
+    expect(vi.mocked(getStroke).mock.calls.length).toBe(before); // perfect-freehand frisst den kurzen Strich nicht mehr
+  });
+
+  it('#390: zwei Punkte im Abstand von 2 pt (kürzer als width 6) werden ebenfalls zur vollen Scheibe', () => {
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    log.reset();
+    drawStroke(
+      ctx,
+      decodeStroke(
+        tapped('fountain', [
+          [20, 30],
+          [22, 30],
+        ]),
+      ),
+    );
+    expect(log.count('arc')).toBe(1);
+    expect(log.calls.find((c) => c.name === 'arc')!.args.slice(0, 3)).toEqual([21, 30, 3]);
+  });
+
+  it('#390: Grenze bei width: ein Strich mit Ausdehnung ab width bleibt ein Strich; andere Werkzeuge behalten 0,01 pt', () => {
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    const two = (tool: Stroke['tool'], dx: number) =>
+      tapped(tool, [
+        [20, 30],
+        [20 + dx, 30],
+      ]);
+    log.reset();
+    drawStroke(ctx, decodeStroke(two('fountain', 6))); // Ausdehnung = width
+    expect(log.count('arc')).toBe(0);
+    expect(log.count('quadraticCurveTo')).toBeGreaterThan(2);
+    for (const tool of ['pen', 'pencil', 'monoline'] as const) {
+      log.reset();
+      drawStroke(ctx, decodeStroke(two(tool, 2))); // unter width, aber über 0,01 pt: wie bisher ein Strich
+      expect(log.count('arc'), tool).toBe(0);
+      expect(log.count('quadraticCurveTo'), tool).toBeGreaterThan(2);
+    }
+  });
+
   it('zwei Punkte mit echtem Abstand zeichnen weiter über den Umriss', () => {
     const ctx = document.createElement('canvas').getContext('2d')!;
     const s = dot('pen', 2);
