@@ -511,7 +511,9 @@ function drawShape2(ctx: CanvasRenderingContext2D, d: DecodedStroke): void {
  * Mitte des Flecks, wenn alle Punkte (auch mehrere) auf einem Fleck liegen, sonst `null`. Beim Füller ist das jeder
  * Strich, dessen Ausdehnung (Diagonale des umschließenden Rechtecks) kleiner als `width` ist: Ein getipptes Pünktchen
  * zittert, und `perfect-freehand` frisst mit dem auslaufenden Ende (`taper`, 1,2 × `width`) so kurze Striche ganz auf
- * (#390, VERTRAEGE §23.8). Bei den anderen Werkzeugen gilt wie bei v2 `MERGE_DIST`.
+ * (#390, VERTRAEGE §23.8). Das Kriterium ist hier also die Ausdehnung (Diagonale des umschließenden Rechtecks), nicht
+ * der Abstand zum ersten Punkt wie bei v2. Bei den anderen Werkzeugen gilt `MERGE_DIST` (0,01 pt), ebenfalls als
+ * Ausdehnung. Längere, aber noch sehr kurze Striche fängt `degenerateFallback` auf (#394).
  */
 function singlePointCenter(d: DecodedStroke): { x: number; y: number } | null {
   if (d.count < 1) return null;
@@ -551,6 +553,74 @@ function drawDot(ctx: CanvasRenderingContext2D, d: DecodedStroke, c: { x: number
   ctx.fill();
 }
 
+/** Fläche des Umrisses als Vieleck (Gauß'sche Trapezformel, Betrag) */
+function polygonArea(pts: Outline): number {
+  let a = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i]!;
+    const q = pts[(i + 1) % pts.length]!;
+    a += p[0]! * q[1]! - q[0]! * p[1]!;
+  }
+  return Math.abs(a) / 2;
+}
+
+/** Ein Umriss unter diesem Anteil einer Scheibe (Textmarker: eines Quadrats) mit Durchmesser `width` gilt als zerfressen */
+const MIN_AREA_FACTOR = 0.75;
+
+/**
+ * Kurze v1-Striche: `perfect-freehand` verwirft die Punkte der ersten `size` Lauflänge und glättet dazu, so dass bei
+ * einer Ausdehnung zwischen etwa `width` und 2 × `width` mit wenigen Punkten fast nichts übrig bleibt (gemessen: 0 %
+ * der Scheibe bei 6 pt und 2 bis 4 Punkten, #394). Ist der Umriss zerfressen (siehe `MIN_AREA_FACTOR`), zeichnet
+ * `drawShortStroke` stattdessen eine Kapsel von Anfangs- zu Endpunkt (Textmarker: ein stumpfes Rechteck mindestens der
+ * Länge `width`). Längere Striche haben mehr Fläche und bleiben unberührt.
+ */
+function isDegenerate(d: DecodedStroke, pts: Outline): boolean {
+  const w = d.width;
+  const min = MIN_AREA_FACTOR * (styleOf(d).cap ? Math.PI * (w / 2) ** 2 : w * w);
+  return pts.length < 3 || !(polygonArea(pts) >= min);
+}
+
+function drawShortStroke(ctx: CanvasRenderingContext2D, d: DecodedStroke): void {
+  const last = (d.count - 1) * DECODED_STRIDE;
+  const ax = d.pts[0]!;
+  const ay = d.pts[1]!;
+  const bx = d.pts[last]!;
+  const by = d.pts[last + 1]!;
+  const len = Math.hypot(bx - ax, by - ay);
+  const ux = len > 1e-6 ? (bx - ax) / len : 1;
+  const uy = len > 1e-6 ? (by - ay) / len : 0;
+  const r = d.width / 2;
+  ctx.fillStyle = rgba(d.color, d.color.a * styleOf(d).alpha);
+  ctx.beginPath();
+  if (styleOf(d).cap) {
+    // Kapsel: Scheiben an beiden Enden und ein Viereck dazwischen, alle im selben Umlaufsinn (nonzero)
+    for (const [x, y] of [
+      [ax, ay],
+      [bx, by],
+    ] as const) {
+      ctx.moveTo(x + r, y);
+      ctx.arc(x, y, r, 0, Math.PI * 2, false);
+      ctx.closePath();
+    }
+    // Normale n = (-uy, ux): (A-rn, B-rn, B+rn, A+rn) hat positiven Umlaufsinn wie `arc(…, false)` im Canvas
+    ctx.moveTo(ax + uy * r, ay - ux * r);
+    ctx.lineTo(bx + uy * r, by - ux * r);
+    ctx.lineTo(bx - uy * r, by + ux * r);
+    ctx.lineTo(ax - uy * r, ay + ux * r);
+  } else {
+    // Stumpfes Rechteck, Länge mindestens `width`, um die Mitte von A und B
+    const half = Math.max(len, d.width) / 2;
+    const cx = (ax + bx) / 2;
+    const cy = (ay + by) / 2;
+    ctx.moveTo(cx - ux * half + uy * r, cy - uy * half - ux * r);
+    ctx.lineTo(cx + ux * half + uy * r, cy + uy * half - ux * r);
+    ctx.lineTo(cx + ux * half - uy * r, cy + uy * half + ux * r);
+    ctx.lineTo(cx - ux * half - uy * r, cy - uy * half + ux * r);
+  }
+  ctx.closePath();
+  ctx.fill('nonzero');
+}
+
 /** Zeichnet einen Strich als gefüllten, geglätteten Umriss (ein Pfad, damit Transparenz nicht doppelt deckt). */
 export function drawStroke(ctx: CanvasRenderingContext2D, d: DecodedStroke): void {
   if (d.diam) {
@@ -563,7 +633,10 @@ export function drawStroke(ctx: CanvasRenderingContext2D, d: DecodedStroke): voi
     return;
   }
   const pts = strokeOutline(d);
-  if (pts.length < 2) return;
+  if (isDegenerate(d, pts)) {
+    drawShortStroke(ctx, d);
+    return;
+  }
   ctx.fillStyle = rgba(d.color, d.color.a * styleOf(d).alpha);
   ctx.beginPath();
   const first = pts[0]!;

@@ -40,20 +40,23 @@ const page07 = files.find((f) => f.name.startsWith('07'))!.strokes;
 const marker04 = files.find((f) => f.name.startsWith('04'))!.strokes;
 
 /**
- * Wie viel langsamer als der Entwicklerrechner ist diese Maschine gerade (mindestens 1)? Gemessen am Minimum mehrerer
- * Läufe einer festen Rechenschleife (etwa 7,5 ms unter Vitest lokal). Zeitgrenzen der Tests wachsen damit, ein echter Einbruch fällt
- * trotzdem auf, weil die Schleife davon unberührt bleibt (#391).
+ * Wie viel langsamer als der Entwicklerrechner ist diese Maschine gerade (mindestens 1)? Gemessen am Median mehrerer
+ * Läufe einer festen Rechenschleife (etwa 7,5 ms unter Vitest lokal). Der Median statt des Minimums, weil das Minimum
+ * eine anhaltende Last unterschätzt (gesehen: Faktor 1,00, während der Test selbst schon 106 ms statt 40 ms brauchte,
+ * #394). Zeitgrenzen der Tests wachsen damit, ein echter Einbruch fällt trotzdem auf, weil die Schleife davon unberührt
+ * bleibt (#391).
  */
 function machineSlowdown(): number {
-  let best = Infinity;
+  const runs: number[] = [];
   for (let k = 0; k < 9; k++) {
     const t = performance.now();
     let x = 0;
     for (let i = 0; i < 3e6; i++) x += Math.sqrt(i) * 1.0001;
     const dt = performance.now() - t;
-    if (x >= 0 && dt < best) best = dt;
+    runs.push(x >= 0 ? dt : Infinity);
   }
-  return Math.max(1, best / 7.5);
+  runs.sort((a, b) => a - b);
+  return Math.max(1, runs[runs.length >> 1]! / 7.5);
 }
 
 let log: CanvasLog;
@@ -268,11 +271,13 @@ describe('<InkPage>', () => {
     const { rerender } = render(<InkPage strokes={all} width={600} />);
     let warm = Infinity;
     for (let k = 0; k < 5; k++) {
+      log.reset();
       const t0 = performance.now();
       rerender(<InkPage strokes={[...all]} width={601 + (k % 2)} />); // Größenwechsel erzwingt volles Neuzeichnen aus dem Cache
       warm = Math.min(warm, performance.now() - t0); // Minimum: Störungen machen einen Lauf nur langsamer (#391)
+      expect(log.fills.length).toBeGreaterThan(0); // es wurde wirklich gezeichnet (#394)
     }
-    expect(warm).toBeLessThan(250 * slow);
+    expect(warm).toBeLessThan(40 * slow); // gemessen ca. 10 ms lokal; die alte Grenze 250 ms prüfte nichts (#394)
   });
 
   it('zeichnet ein unbekanntes Werkzeug wie den Stift und begrenzt absurde Breiten', () => {
@@ -1439,9 +1444,9 @@ describe('V2-5: v1-Strich aus einem einzigen Punkt', () => {
         [20 + dx, 30],
       ]);
     log.reset();
-    drawStroke(ctx, decodeStroke(two('fountain', 6))); // Ausdehnung = width
-    expect(log.count('arc')).toBe(0);
-    expect(log.count('quadraticCurveTo')).toBeGreaterThan(2);
+    drawStroke(ctx, decodeStroke(two('fountain', 6))); // Ausdehnung = width: kein Einzelpunkt, sondern Kapsel (#394)
+    expect(log.count('arc')).toBe(2);
+    expect(log.calls.find((c) => c.name === 'arc')!.args.slice(0, 3)).toEqual([20, 30, 3]);
     for (const tool of ['pen', 'pencil', 'monoline'] as const) {
       log.reset();
       drawStroke(ctx, decodeStroke(two(tool, 2))); // unter width, aber über 0,01 pt: wie bisher ein Strich
@@ -1467,5 +1472,144 @@ describe('V2-5: v1-Strich aus einem einzigen Punkt', () => {
     expect(b.x1).toBeGreaterThanOrEqual(23);
     expect(b.y0).toBeLessThanOrEqual(27);
     expect(b.y1).toBeGreaterThanOrEqual(33);
+  });
+});
+
+/**
+ * Fläche in pt², die der zuletzt gezeichnete Pfad deckt (Füllregel nonzero, Raster 0,05 pt). Zählt Bögen, Linien und
+ * `quadraticCurveTo` wirklich aus, statt Aufrufe zu zählen: Ein Umriss aus vielen Kurven kann trotzdem nur eine
+ * Fläche von fast null haben (#394).
+ */
+function coveredArea(calls: CanvasLog['calls']): number {
+  const polys: [number, number][][] = [];
+  let cur: [number, number][] = [];
+  const start = (x: number, y: number) => {
+    cur = [[x, y]];
+    polys.push(cur);
+  };
+  for (const c of calls) {
+    const a = c.args as number[];
+    if (c.name === 'moveTo') start(a[0]!, a[1]!);
+    else if (c.name === 'lineTo') cur.push([a[0]!, a[1]!]);
+    else if (c.name === 'quadraticCurveTo') {
+      const [x0, y0] = cur[cur.length - 1]!;
+      for (let t = 1; t <= 8; t++) {
+        const u = t / 8;
+        cur.push([
+          (1 - u) ** 2 * x0 + 2 * (1 - u) * u * a[0]! + u * u * a[2]!,
+          (1 - u) ** 2 * y0 + 2 * (1 - u) * u * a[1]! + u * u * a[3]!,
+        ]);
+      }
+    } else if (c.name === 'arc') {
+      cur.length = 0;
+      for (let k = 0; k < 64; k++) {
+        const ang = a[3]! + ((a[4]! - a[3]!) * k) / 64;
+        cur.push([a[0]! + a[2]! * Math.cos(ang), a[1]! + a[2]! * Math.sin(ang)]);
+      }
+    }
+  }
+  const xs = polys.flat().map((p) => p[0]);
+  const ys = polys.flat().map((p) => p[1]);
+  if (xs.length === 0) return 0;
+  const step = 0.05;
+  const x0 = Math.min(...xs);
+  const y0 = Math.min(...ys);
+  let n = 0;
+  for (let y = y0 + step / 2; y < Math.max(...ys); y += step) {
+    for (let x = x0 + step / 2; x < Math.max(...xs); x += step) {
+      let wind = 0;
+      for (const poly of polys) {
+        for (let i = 0; i < poly.length; i++) {
+          const [px, py] = poly[i]!;
+          const [qx, qy] = poly[(i + 1) % poly.length]!;
+          if (
+            py <= y
+              ? qy > y && (qx - px) * (y - py) - (x - px) * (qy - py) > 0
+              : qy <= y && (qx - px) * (y - py) - (x - px) * (qy - py) < 0
+          )
+            wind += py <= y ? 1 : -1;
+        }
+      }
+      if (wind !== 0) n++;
+    }
+  }
+  return n * step * step;
+}
+
+describe('#394: kurze v1-Striche behalten ihre Fläche', () => {
+  const base = files[0]!.strokes[0]!;
+  const disc = Math.PI * 9; // width 6
+  /** Punkte gleichmäßig auf einer waagerechten Linie der Länge `extent`, Druck 0,3 */
+  function line(tool: Stroke['tool'], extent: number, n: number, jitter = 0): Stroke {
+    const buf = Buffer.alloc(n * 24);
+    for (let i = 0; i < n; i++) {
+      buf.writeFloatLE(20 + (n > 1 ? (extent * i) / (n - 1) : 0) + (i % 2 ? jitter : 0), i * 24);
+      buf.writeFloatLE(30 + (i % 2 ? jitter / 2 : 0), i * 24 + 4);
+      buf.writeFloatLE(i, i * 24 + 8);
+      buf.writeFloatLE(0.3, i * 24 + 12);
+    }
+    const { sizes: _s, ...rest } = base as Stroke & { sizes?: string };
+    return {
+      ...rest,
+      tool,
+      layer: tool === 'marker' ? 'highlight' : 'ink',
+      width: 6,
+      transform: [1, 0, 0, 1, 0, 0],
+      points: buf.toString('base64'),
+    } as Stroke;
+  }
+  function area(s: Stroke): number {
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    log.reset();
+    drawStroke(ctx, decodeStroke(s));
+    return coveredArea(log.calls);
+  }
+
+  it('Füller: jede Ausdehnung von 0 bis 3 × width deckt mindestens die halbe Scheibe, kein Sprung auf 0', () => {
+    for (const n of [2, 3, 4, 6]) {
+      for (let e = 0; e <= 18; e += 0.5) {
+        expect(area(line('fountain', e, n)), `${e} pt, ${n} Punkte`).toBeGreaterThanOrEqual(0.5 * disc);
+      }
+    }
+    for (const e of [5.9, 5.99, 6.01, 6.1, 7, 9, 12]) {
+      expect(area(line('fountain', e, 3)), `${e} pt`).toBeGreaterThanOrEqual(0.5 * disc);
+    }
+  });
+
+  it('Füller knapp unter width: volle Scheibe; knapp darüber (6,1 und 9 pt): mindestens die halbe Scheibe', () => {
+    expect(area(line('fountain', 5.9, 3))).toBeCloseTo(disc, 0);
+    expect(area(line('fountain', 6.1, 3))).toBeGreaterThanOrEqual(0.5 * disc);
+    expect(area(line('fountain', 9, 3))).toBeGreaterThanOrEqual(0.5 * disc);
+    expect(area(line('fountain', 7, 3))).toBeGreaterThanOrEqual(0.5 * disc);
+  });
+
+  it('die Kapsel ist so breit wie width und deckt Scheibe plus Rechteck', () => {
+    // Länge 6,1 pt: π·3² + 6 × 6,1
+    expect(area(line('fountain', 6.1, 3))).toBeCloseTo(disc + 6 * 6.1, 0);
+  });
+
+  it('lange Füllerstriche laufen weiter über den perfect-freehand-Umriss (keine Scheiben, nur Kurven)', () => {
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    log.reset();
+    drawStroke(ctx, decodeStroke(line('fountain', 60, 12)));
+    expect(log.count('arc')).toBe(0);
+    expect(log.count('quadraticCurveTo')).toBeGreaterThan(8);
+  });
+
+  it('Textmarker-Tippen mit Zittern (0,3 pt) deckt mindestens das halbe Quadrat width × width, nicht 5 %', () => {
+    expect(area(line('marker', 0.3, 3, 0.3))).toBeGreaterThanOrEqual(0.5 * 36);
+    expect(area(line('marker', 0, 3, 0.3))).toBeGreaterThanOrEqual(0.5 * 36);
+    expect(area(line('marker', 0, 1))).toBeCloseTo(36, 0); // exaktes Tippen wie bisher
+  });
+
+  it('Textmarker-Strich mit wenigen Punkten und Ausdehnung 3 pt bleibt sichtbar', () => {
+    expect(area(line('marker', 3, 3))).toBeGreaterThanOrEqual(0.5 * 36);
+  });
+
+  it('Stift, Bleistift, Monoline: unverändert (Tippen mit Zittern liefert weiter eine Fläche über der Scheibe)', () => {
+    // Offen (#394, VERTRAEGE §23.8): Tippen mit Zittern deckt hier mehr als die Scheibe; die Grenze bleibt bei 0,01 pt
+    for (const tool of ['pen', 'pencil', 'monoline'] as const) {
+      expect(area(line(tool, 0.3, 3, 0.3)), tool).toBeGreaterThanOrEqual(disc);
+    }
   });
 });
