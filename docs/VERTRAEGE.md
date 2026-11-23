@@ -16,6 +16,7 @@ Diese Datei legt fest, wie Core, Worker, Web-App, iPad-App und `sg`-CLI zusammen
 | `SG_WEB_DIR` | `<repo>/apps/web/out` | Core (liefert den Static Export aus) |
 | `SG_TUNNEL` | an. `0` schaltet den Tunnel-Eingang und die Schlüsseldatei ab (UX-12, §5, §12 Schritt 8) | Core (bei `0`: kein Socket, keine Schlüsseldatei, sie wird beim Start gelöscht) |
 | `SG_TUNNEL_P2P` | an. `0` schaltet die Ankündigung des Tunnels im Funk (peer-to-peer) ab (UX-12) | `sg` und `sg-tunnel` (Mac-Helfer). `sg` reicht sie als `--p2p on|off` weiter, der Core liest sie nicht |
+| `SG_SEARCH_WORKERS` | `2`. Ganze Zahl 0–4: `max_parallel_workers_per_gather` der Suche (§19.6, #334), `0` schaltet parallele Worker ab | Core |
 | `SG_DEV_WEB_ORIGIN` | leer. In der Entwicklung `http://localhost:3000` | Core (CORS nur für diesen Origin) |
 | `NEXT_PUBLIC_SG_API_BASE` | `/api/v1`. In der Entwicklung `http://localhost:4710/api/v1` | Web-App |
 | `SG_LOG_LEVEL` | `info` | Core, Worker |
