@@ -513,7 +513,7 @@ function drawShape2(ctx: CanvasRenderingContext2D, d: DecodedStroke): void {
  * zittert, und `perfect-freehand` frisst mit dem auslaufenden Ende (`taper`, 1,2 × `width`) so kurze Striche ganz auf
  * (#390, VERTRAEGE §23.8). Das Kriterium ist hier also die Ausdehnung (Diagonale des umschließenden Rechtecks), nicht
  * der Abstand zum ersten Punkt wie bei v2. Bei den anderen Werkzeugen gilt `MERGE_DIST` (0,01 pt), ebenfalls als
- * Ausdehnung. Längere, aber noch sehr kurze Striche fängt `degenerateFallback` auf (#394).
+ * Ausdehnung. Längere, aber noch sehr kurze Striche fangen `isDegenerate` und `drawShortStroke` auf (#394).
  */
 function singlePointCenter(d: DecodedStroke): { x: number; y: number } | null {
   if (d.count < 1) return null;
@@ -587,8 +587,10 @@ function drawShortStroke(ctx: CanvasRenderingContext2D, d: DecodedStroke): void 
   const bx = d.pts[last]!;
   const by = d.pts[last + 1]!;
   const len = Math.hypot(bx - ax, by - ay);
-  const ux = len > 1e-6 ? (bx - ax) / len : 1;
-  const uy = len > 1e-6 ? (by - ay) / len : 0;
+  // Textmarker unter `width` Länge: achsparallel wie `drawDot`, sonst würde ein Tippen mit diagonalem Zittern zur um 45° gedrehten Raute
+  const axisAligned = len < 1e-6 || (!styleOf(d).cap && len < d.width);
+  const ux = axisAligned ? 1 : (bx - ax) / len;
+  const uy = axisAligned ? 0 : (by - ay) / len;
   const r = d.width / 2;
   ctx.fillStyle = rgba(d.color, d.color.a * styleOf(d).alpha);
   ctx.beginPath();

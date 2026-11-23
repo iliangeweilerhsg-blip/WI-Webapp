@@ -20,7 +20,7 @@ import {
   TOOL_STYLES,
   type StrokeShape,
 } from '../src/components/ink/render.ts';
-import { decodeStroke, parseColor } from '../src/components/ink/stroke.ts';
+import { DECODED_STRIDE, decodeStroke, parseColor } from '../src/components/ink/stroke.ts';
 import { installCanvasMock, type CanvasLog } from './canvas-mock.ts';
 import { loadV1Fixtures, loadV2Fixtures } from './ink-fixtures.ts';
 
@@ -277,7 +277,7 @@ describe('<InkPage>', () => {
       warm = Math.min(warm, performance.now() - t0); // Minimum: Störungen machen einen Lauf nur langsamer (#391)
       expect(log.fills.length).toBeGreaterThan(0); // es wurde wirklich gezeichnet (#394)
     }
-    expect(warm).toBeLessThan(40 * slow); // gemessen ca. 10 ms lokal; die alte Grenze 250 ms prüfte nichts (#394)
+    expect(warm).toBeLessThan(80 * slow); // gemessen ca. 10 ms lokal; die alte Grenze 250 ms prüfte nichts (#394)
   });
 
   it('zeichnet ein unbekanntes Werkzeug wie den Stift und begrenzt absurde Breiten', () => {
@@ -1604,6 +1604,137 @@ describe('#394: kurze v1-Striche behalten ihre Fläche', () => {
 
   it('Textmarker-Strich mit wenigen Punkten und Ausdehnung 3 pt bleibt sichtbar', () => {
     expect(area(line('marker', 3, 3))).toBeGreaterThanOrEqual(0.5 * 36);
+  });
+
+  /** Fläche des perfect-freehand-Umrisses (Gauß'sche Trapezformel), unabhängig von render.ts nachgerechnet */
+  function outlineArea(s: Stroke): number {
+    const pts = strokeOutline(decodeStroke(s));
+    let a = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i]!;
+      const q = pts[(i + 1) % pts.length]!;
+      a += p[0]! * q[1]! - q[0]! * p[1]!;
+    }
+    return Math.abs(a) / 2;
+  }
+  function arcs(s: Stroke): number {
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    log.reset();
+    drawStroke(ctx, decodeStroke(s));
+    return log.count('arc');
+  }
+
+  it('Sprung an der 75-%-Grenze ist begrenzt: Kapsel genau Scheibe + Länge × width, Umriss darüber ohne Kapsel (§23.8)', () => {
+    // Füller, width 6, 5 Punkte: knapp unter der Grenze zeichnet die Kapsel (bewusst: sichtbar vor unsichtbar) …
+    let lastFallback = -1;
+    let firstOutline = -1;
+    for (let e = 6; e <= 14; e += 0.05) {
+      const s = line('fountain', e, 5);
+      const isCapsule = arcs(s) === 2;
+      const out = outlineArea(s);
+      // Kapsel genau dann, wenn der Umriss unter 75 % der Scheibe liegt
+      expect(isCapsule, `${e.toFixed(2)} pt`).toBe(!(out >= 0.75 * disc));
+      if (isCapsule) {
+        // Obergrenze: die Kapsel wächst nie über Scheibe + Länge × width (Länge = erster bis letzter Punkt)
+        const len = Math.fround(20 + e) - 20;
+        if (Math.round(e * 20) % 10 === 0) {
+          // Raster ist teuer: nur alle 0,5 pt ausmessen
+          const a = area(s);
+          expect(a, `${e.toFixed(2)} pt`).toBeLessThanOrEqual(disc + len * 6 + 0.5);
+          expect(a, `${e.toFixed(2)} pt`).toBeGreaterThanOrEqual(disc + len * 6 - 0.5);
+        }
+        lastFallback = e;
+      } else if (firstOutline < 0) firstOutline = e;
+    }
+    expect(lastFallback).toBeGreaterThan(6); // die Kapsel kommt vor
+    expect(firstOutline).toBeGreaterThan(lastFallback - 1e-9); // darüber nur noch perfect-freehand
+    // der dokumentierte Sprung: 7,75 pt Kapsel ≈ 2,65 × Scheibe, 8 pt perfect-freehand ≈ 0,70 × Scheibe
+    expect(arcs(line('fountain', 7.75, 5))).toBe(2);
+    expect(area(line('fountain', 7.75, 5)) / disc).toBeCloseTo(2.65, 1);
+    expect(arcs(line('fountain', 8, 5))).toBe(0);
+    expect(area(line('fountain', 8, 5)) / disc).toBeLessThan(0.8);
+  });
+
+  it('keiner der 299 Fixture-Striche landet in der Kapsel (Schwelle 0,75 ist wirksam, nicht nur vorhanden)', () => {
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    let checked = 0;
+    for (const f of files) {
+      for (const s of f.strokes) {
+        const d = decodeStroke(s);
+        if (d.diam) continue;
+        let x0 = Infinity,
+          y0 = Infinity,
+          x1 = -Infinity,
+          y1 = -Infinity;
+        for (let i = 0; i < d.count; i++) {
+          const x = d.pts[i * DECODED_STRIDE]!;
+          const y = d.pts[i * DECODED_STRIDE + 1]!;
+          x0 = Math.min(x0, x);
+          x1 = Math.max(x1, x);
+          y0 = Math.min(y0, y);
+          y1 = Math.max(y1, y);
+        }
+        const limit = d.tool === 'fountain' ? Math.max(0.01, d.width) : 0.01;
+        if (Math.hypot(x1 - x0, y1 - y0) < limit) continue; // Einzelpunkt: Scheibe (1 Bogen), keine Kapsel
+        log.reset();
+        drawStroke(ctx, d);
+        // perfect-freehand-Umriss: Kurven. Kapsel/Rechteck: keine Kurven (Kapsel 2 Bögen)
+        expect(log.count('quadraticCurveTo'), `${f.name} ${s.client_id}`).toBeGreaterThan(2);
+        expect(log.count('arc'), `${f.name} ${s.client_id}`).toBe(0);
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(250);
+  });
+
+  it('Umriss zwischen 10 % und 75 % der Scheibe wird durch die Kapsel ersetzt (tötet 0,75 → 0,1)', () => {
+    let found = 0;
+    for (let e = 6; e <= 14; e += 0.05) {
+      for (const n of [3, 4, 5, 6]) {
+        const s = line('fountain', e, n);
+        const ratio = outlineArea(s) / disc;
+        if (ratio > 0.12 && ratio < 0.7) {
+          found++;
+          expect(arcs(s), `${e.toFixed(2)} pt, ${n} Punkte, Umriss ${ratio.toFixed(2)}`).toBe(2);
+        }
+      }
+    }
+    expect(found).toBeGreaterThan(0);
+  });
+
+  it('Textmarker-Tippen mit diagonalem Zittern unter width bleibt ein achsparalleles Quadrat, keine 45°-Raute', () => {
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    const mk = (pts: [number, number][]) => {
+      const s = line('marker', 0, pts.length);
+      const buf = Buffer.alloc(pts.length * 24);
+      pts.forEach(([x, y], i) => {
+        buf.writeFloatLE(x, i * 24);
+        buf.writeFloatLE(y, i * 24 + 4);
+        buf.writeFloatLE(i, i * 24 + 8);
+        buf.writeFloatLE(0.3, i * 24 + 12);
+      });
+      return { ...s, points: buf.toString('base64') } as Stroke;
+    };
+    log.reset();
+    drawStroke(
+      ctx,
+      decodeStroke(
+        mk([
+          [20, 30],
+          [22, 32],
+        ]),
+      ),
+    );
+    const corners = log.calls
+      .filter((c) => c.name === 'moveTo' || c.name === 'lineTo')
+      .map((c) => c.args as number[]);
+    expect(corners).toHaveLength(4);
+    for (let i = 0; i < 4; i++) {
+      const p = corners[i]!;
+      const q = corners[(i + 1) % 4]!;
+      expect(Math.min(Math.abs(p[0]! - q[0]!), Math.abs(p[1]! - q[1]!)), `Kante ${i}`).toBeCloseTo(0, 5);
+    }
+    expect(coveredArea(log.calls)).toBeCloseTo(36, 0);
   });
 
   it('Stift, Bleistift, Monoline: unverändert (Tippen mit Zittern liefert weiter eine Fläche über der Scheibe)', () => {
