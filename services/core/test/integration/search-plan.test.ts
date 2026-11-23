@@ -65,8 +65,10 @@ beforeAll(async () => {
     FROM generate_series(1, ${DECKS}) i`;
   const decks = await sql<{ id: string }[]>`SELECT id FROM slide_deck ORDER BY title`;
   let n = 0;
-  for (const deck of decks) {
-    for (let s = 1; s <= SLIDES; s += 1) {
+  // Decks reihum einfügen (außen Folie, innen Deck): Sonst hängt die Korrelation von deck_id an den zufälligen
+  // UUIDs, und der Planer nimmt manchmal einen vollen Index-Scan über search_chunk_deck_idx statt GIN (Review #401).
+  for (let s = 1; s <= SLIDES; s += 1) {
+    for (const deck of decks) {
       n += 1;
       const text = textFor(n);
       const vector = `[${fakeEmbed(text).join(',')}]`;
@@ -181,10 +183,9 @@ describe('gefilterte Bedeutungssuche mit Planer-Einstellungen (#400)', () => {
 });
 
 describe('Plan der Wortsuche (#400)', () => {
-  // Geprüft wird nur „kein Seq Scan“: Ob der Planer den GIN-Index (Bitmap) oder bei dieser kleinen Fixture einen
-  // Index-Scan über search_chunk_deck_idx wählt, hängt von zufälligen UUIDs ab (flaky im Review zu #401).
-  // Ohne die Einstellungen wählt er hier einen Seq Scan, der Test fängt den Wegfall also weiter.
-  it.each(['selten', 'alpha'])('"%s": kein Seq Scan auf search_chunk', async (q) => {
+  // Ziel aus textSettings: tsv wird über den GIN-Index gefiltert (Index Cond bzw. Recheck Cond auf tsv @@), nicht als
+  // Filter eines vollen Scans. Ohne die Einstellungen wählt der Planer hier einen Seq Scan.
+  it.each(['selten', 'alpha'])('"%s": GIN-Index auf tsv, kein Seq Scan', async (q) => {
     const parsed = parseSearchQuery(q);
     const text = tsQueryText(parsed.words, parsed.prefixLast)!;
     const plan = (
@@ -196,6 +197,8 @@ describe('Plan der Wortsuche (#400)', () => {
     )
       .map((r) => Object.values(r)[0])
       .join('\n');
+    expect(plan, plan).toContain('Bitmap Index Scan on search_chunk_tsv_gin');
+    expect(plan, plan).toMatch(/(Index|Recheck) Cond: \(.*tsv @@/);
     expect(plan, plan).not.toContain('Seq Scan on search_chunk');
   });
 });
