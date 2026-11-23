@@ -181,7 +181,10 @@ describe('gefilterte Bedeutungssuche mit Planer-Einstellungen (#400)', () => {
 });
 
 describe('Plan der Wortsuche (#400)', () => {
-  it.each(['selten', 'alpha'])('"%s": Bitmap-Scan auf dem GIN-Index, kein Seq Scan', async (q) => {
+  // Geprüft wird nur „kein Seq Scan“: Ob der Planer den GIN-Index (Bitmap) oder bei dieser kleinen Fixture einen
+  // Index-Scan über search_chunk_deck_idx wählt, hängt von zufälligen UUIDs ab (flaky im Review zu #401).
+  // Ohne die Einstellungen wählt er hier einen Seq Scan, der Test fängt den Wegfall also weiter.
+  it.each(['selten', 'alpha'])('"%s": kein Seq Scan auf search_chunk', async (q) => {
     const parsed = parseSearchQuery(q);
     const text = tsQueryText(parsed.words, parsed.prefixLast)!;
     const plan = (
@@ -193,8 +196,7 @@ describe('Plan der Wortsuche (#400)', () => {
     )
       .map((r) => Object.values(r)[0])
       .join('\n');
-    expect(plan, plan).toContain('Bitmap Index Scan on search_chunk_tsv_gin');
-    expect(plan).not.toContain('Seq Scan on search_chunk');
+    expect(plan, plan).not.toContain('Seq Scan on search_chunk');
   });
 });
 

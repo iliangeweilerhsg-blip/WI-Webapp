@@ -1027,6 +1027,7 @@ Die Bereiche KI, Lernen und Planer kommen in späteren Phasen als eigene Schlüs
 | `range_not_satisfiable` | 416 | `Range` liegt außerhalb der Datei (`GET …/file`, `GET …/audio`) |
 | `backup_running`, `backup_target_missing`, `restore_test_running` (läuft gerade ein Restore-Test bzw. ein Backup), `restore_test_no_backup` (noch kein Backup-Lauf mit Prüfsumme für das aktuelle Ziel), `restore_parent_deleted`, `restore_conflict` | 409 | Daten (§13) |
 | `storage_unavailable` | 503 | Datenträger des Datenordners nicht lesbar (§7.6) |
+| `search_timeout` | 503 | Suchabfrage hat das Zeitlimit (2 s) überschritten (§19.6) |
 | `pairing_window_closed` | 409 | Kopplungsfenster zu oder abgelaufen (§12) |
 | `chunk_header_invalid`, `backup_target_invalid`, `backup_encryption_unavailable`, `upload_aborted`, `slide_deck_module_mismatch` | 400 | Anfrage ungültig (`upload_aborted`: der Client hat den Upload abgebrochen; `backup_encryption_unavailable`: Backup-Verschlüsselung lässt sich nicht einschalten, §14.1) |
 | `slide_deck_not_found` | 404 | Foliensatz fehlt oder ist gelöscht (Session-Routen) |
@@ -1845,7 +1846,7 @@ Der Core braucht für eine Suchanfrage deren Vektor, berechnet mit **demselben**
 | `module_id` | optional, nur dieses Modul (zusätzlich zu `fach:`)                    |
 | `limit`     | optional, 1–50, Standard 20                                           |
 
-Antwort 200 `SearchResponse`, Fehler `400 validation_failed`. Erlaubt für lokal und Netz (wie die übrigen Lese-Routen).
+Antwort 200 `SearchResponse`, Fehler `400 validation_failed`, `503 search_timeout` (eine Suchabfrage hat das Zeitlimit von 2 s überschritten, #400). Erlaubt für lokal und Netz (wie die übrigen Lese-Routen).
 
 0. **Normalisieren:** `q` nach NFC (sonst zerfallen zerlegte Umlaute in Teilwörter).
 1. **Präfixe** (F-SUC-01), getrennt durch Leerraum, Groß-/Kleinschreibung egal (auch in `x`): `fach:<x>` → Modul mit `short_name` gleich `x`, sonst Module, deren `name` mit `x` beginnt (nicht gelöscht). Leeres `fach:` gilt als nicht aufgelöst. `typ:folie` → nur `slide`, `typ:gesagtes` → nur `transcript`. Mehrere `typ:` vereinigen sich. Ein Präfix, das nichts trifft (unbekanntes Fach, unbekannter Typ, `semester:` in diesem Schnitt), steht in `filters.unresolved` und macht die Trefferliste leer. Ist `module_id` unbekannt oder gelöscht, steht `module_id:<id>` in `filters.unresolved`. Ist die Schnittmenge aus `module_id` und `fach:` leer, steht der `fach:`-Filter in `unresolved` (nie `module_ids: []`, das hieße „alle“). Der Rest von `q` ist der Suchtext.

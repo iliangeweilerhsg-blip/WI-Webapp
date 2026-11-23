@@ -56,7 +56,7 @@ function Overlay({ onClose }: { onClose: () => void }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
-  const { response, concepts, failed, slow } = useSearch(query);
+  const { response, concepts, failed, timedOut, slow } = useSearch(query);
   const [rect, setRect] = useState<Rect | null>(null);
   const mac = useMemo(() => isMacPlatform(), []);
 
@@ -340,7 +340,9 @@ function Overlay({ onClose }: { onClose: () => void }) {
             ) : null}
             {!empty && failed ? (
               <p role="status" className="px-3 py-2 text-sm text-text-muted">
-                Suche gerade nicht erreichbar
+                {timedOut
+                  ? 'Die Suche hat zu lange gedauert. Versuch es mit genaueren Wörtern noch einmal.'
+                  : 'Suche gerade nicht erreichbar'}
               </p>
             ) : null}
             {!empty && !failed && response ? (

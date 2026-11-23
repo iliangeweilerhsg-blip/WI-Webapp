@@ -42,7 +42,7 @@ export async function searchRoutes(app: FastifyInstance, deps: SearchRouteDeps):
         tags: ['Suche'],
         summary: 'Folien und Gesagtes durchsuchen, im Wortlaut und nach Bedeutung (F-SUC-01)',
         querystring: SearchQuerySchema,
-        response: { 200: SearchResponseSchema, 400: ApiErrorSchema },
+        response: { 200: SearchResponseSchema, 400: ApiErrorSchema, 503: ApiErrorSchema },
       },
     },
     async (request) =>
