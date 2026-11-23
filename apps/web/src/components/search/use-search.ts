@@ -4,6 +4,7 @@
 // letzte Antwort bleibt sichtbar, bis die neue da ist. Ein Ladehinweis erscheint erst nach 300 ms.
 import { useEffect, useState } from 'react';
 import type { ConceptListItem, SearchResponse } from '@sg/shared';
+import { ApiRequestError } from '../../lib/api.ts';
 import { SEARCH_DEBOUNCE_MS, SLOW_HINT_MS, fetchConceptHits, fetchSearch } from '../../lib/search.ts';
 
 export interface SearchState {
@@ -13,6 +14,8 @@ export interface SearchState {
   concepts: ConceptListItem[];
   /** Die letzte Anfrage ist gescheitert (Core nicht erreichbar o. Ä.) */
   failed: boolean;
+  /** Die letzte Anfrage ist am Zeitlimit des Core gescheitert (`503 search_timeout`, §19.6) */
+  timedOut: boolean;
   /** Eine Anfrage läuft seit mehr als 300 ms */
   slow: boolean;
 }
@@ -21,6 +24,7 @@ export function useSearch(query: string): SearchState {
   const [response, setResponse] = useState<SearchResponse | null>(null);
   const [concepts, setConcepts] = useState<ConceptListItem[]>([]);
   const [failed, setFailed] = useState(false);
+  const [timedOut, setTimedOut] = useState(false);
   const [slow, setSlow] = useState(false);
   const empty = query.trim() === '';
 
@@ -29,6 +33,7 @@ export function useSearch(query: string): SearchState {
       setResponse(null);
       setConcepts([]);
       setFailed(false);
+      setTimedOut(false);
       setSlow(false);
       return;
     }
@@ -50,12 +55,14 @@ export function useSearch(query: string): SearchState {
           clearTimeout(slowTimer);
           setResponse(result);
           setFailed(false);
+          setTimedOut(false);
           setSlow(false);
         },
-        () => {
+        (err: unknown) => {
           if (controller.signal.aborted) return;
           clearTimeout(slowTimer);
           setFailed(true);
+          setTimedOut(err instanceof ApiRequestError && err.code === 'search_timeout');
           setSlow(false);
         },
       );
@@ -67,5 +74,5 @@ export function useSearch(query: string): SearchState {
     };
   }, [query, empty]);
 
-  return { response, concepts, failed, slow };
+  return { response, concepts, failed, timedOut, slow };
 }

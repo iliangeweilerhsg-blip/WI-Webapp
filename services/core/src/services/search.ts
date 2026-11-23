@@ -7,6 +7,7 @@
 import { sql, type SQL } from 'drizzle-orm';
 import type { SearchHit, SearchKind, SearchResponse, SearchSnippetPart } from '@sg/shared';
 import type { Db } from '../db/client.ts';
+import { HttpError } from '../errors.ts';
 import { WorkerError, type WorkerClient, type WorkerErrorCode } from '../lib/worker-client.ts';
 import { isoTs } from './sessions.ts';
 
@@ -201,6 +202,15 @@ export interface SearchInput {
 export interface SearchDeps {
   db: Db;
   worker: Pick<WorkerClient, 'embed'>;
+  /** `max_parallel_workers_per_gather` der Suche (0–4, Standard 2) */
+  parallelWorkers?: number | undefined;
+  /** `statement_timeout` je Such-Abfrage in ms (Standard 2000) */
+  statementTimeoutMs?: number | undefined;
+}
+
+interface SearchTuning {
+  workers: number;
+  timeoutMs: number;
 }
 
 export interface ResolvedFilters {
@@ -304,46 +314,100 @@ function filterSql(filters: ResolvedFilters): SQL {
 const hasFilter = (filters: ResolvedFilters): boolean =>
   filters.kinds.length > 0 || filters.moduleIds !== null;
 
+/** Obergrenze für eine einzelne Such-Abfrage; danach bricht Postgres sie ab (SQLSTATE 57014) */
+export const STATEMENT_TIMEOUT_MS = 2000;
+/** Standard für `max_parallel_workers_per_gather` der Suche (`SG_SEARCH_WORKERS`) */
+export const DEFAULT_PARALLEL_WORKERS = 2;
+
+type Setting = readonly [name: string, value: string];
+
 /**
  * Planer-Einstellungen für die beiden Abfragen, die bei großem Bestand fast jede Zeile von `search_chunk` anfassen
  * (#334): Der Planer kennt die Kosten nicht, `tsv` (und `embedding`) aus TOAST zu holen, und wählt für häufige Begriffe
  * einen Seq Scan auf einer einzigen Verbindung. Parallele Worker verteilen das Auspacken auf mehrere Kerne. Die
- * Ergebnisse bleiben gleich (nur der Plan ändert sich). `SET LOCAL` gilt nur bis zum Ende der Transaktion.
+ * Ergebnisse bleiben gleich (nur der Plan ändert sich). Die Einstellungen gelten nur bis zum Ende der Transaktion
+ * (`set_config(…, true)` = `SET LOCAL`). Die Obergrenze der Worker setzt man ausdrücklich, damit der Postgres-Standard
+ * (2) sie nicht stillschweigend bestimmt.
  */
-const PARALLEL_SETTINGS = [
-  'SET LOCAL parallel_setup_cost = 0',
-  'SET LOCAL parallel_tuple_cost = 0',
-  'SET LOCAL min_parallel_table_scan_size = 0',
-  'SET LOCAL min_parallel_index_scan_size = 0',
-] as const;
+export function parallelSettings(workers: number): Setting[] {
+  return [
+    ['max_parallel_workers_per_gather', String(workers)],
+    ['parallel_setup_cost', '0'],
+    ['parallel_tuple_cost', '0'],
+    ['min_parallel_table_scan_size', '0'],
+    ['min_parallel_index_scan_size', '0'],
+  ];
+}
 
 /**
  * Wortsuche zusätzlich ohne Seq Scan: Über den GIN-Index (Bitmap Heap Scan) wird `tsv` nur einmal ausgepackt. Beim
  * Seq Scan geschähe das zweimal, einmal für `@@` und einmal für `ts_rank_cd`. Ohne passenden Index bleibt der Seq Scan
  * möglich (`enable_seqscan = off` verteuert ihn nur).
  */
-const TEXT_SETTINGS = ['SET LOCAL enable_seqscan = off', ...PARALLEL_SETTINGS] as const;
-
-async function withSettings<T>(
-  db: Db,
-  settings: readonly string[],
-  fn: (tx: Pick<Db, 'execute'>) => Promise<T>,
-): Promise<T> {
-  return db.transaction(async (tx) => {
-    for (const setting of settings) await tx.execute(sql.raw(setting));
-    return fn(tx);
-  });
+export function textSettings(workers: number): Setting[] {
+  return [['enable_seqscan', 'off'], ...parallelSettings(workers)];
 }
 
-/** Wortsuche: die besten `CANDIDATES` nach `ts_rank_cd` (Gleichstand nach ID) */
-async function textCandidates(db: Db, tsText: string, filters: ResolvedFilters): Promise<string[]> {
-  const rows = await withSettings(db, TEXT_SETTINGS, (tx) =>
-    tx.execute<{ id: string }>(
-      sql`SELECT c.id FROM ${FROM_CHUNKS}
+/** SQLSTATE 57014 (`query_canceled`, auch bei `statement_timeout`). drizzle verpackt den Fehler von postgres.js in `cause`. */
+function isStatementTimeout(error: unknown): boolean {
+  for (let e: unknown = error, depth = 0; e && depth < 4; depth += 1) {
+    if ((e as { code?: unknown }).code === '57014') return true;
+    e = (e as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/**
+ * Eine Transaktion mit allen Einstellungen in einem einzigen Aufruf (`set_config(…, true)`: ein Roundtrip statt je
+ * einem `SET LOCAL`) und dem Zeitlimit `statement_timeout`. Läuft eine Abfrage darüber hinaus, wird sie abgebrochen:
+ * `503 search_timeout` ohne SQL-Text oder sonstige Einzelheiten.
+ */
+export async function withSettings<T>(
+  db: Db,
+  settings: readonly Setting[],
+  timeoutMs: number,
+  fn: (tx: Pick<Db, 'execute'>) => Promise<T>,
+): Promise<T> {
+  const all: Setting[] = [['statement_timeout', `${timeoutMs}ms`], ...settings];
+  try {
+    return await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT ${sql.join(
+          all.map(([name, value]) => sql`set_config(${name}, ${value}, true)`),
+          sql`, `,
+        )}`,
+      );
+      return fn(tx);
+    });
+  } catch (error) {
+    if (isStatementTimeout(error)) {
+      throw new HttpError(
+        503,
+        'search_timeout',
+        'Die Suche hat zu lange gedauert. Bitte später erneut versuchen.',
+      );
+    }
+    throw error;
+  }
+}
+
+/** Abfrage der Wortsuche, exportiert für den Plan-Test: die besten `CANDIDATES` nach `ts_rank_cd` (Gleichstand nach ID) */
+export function textQuery(tsText: string, filters: ResolvedFilters): SQL {
+  return sql`SELECT c.id FROM ${FROM_CHUNKS}
         WHERE ${filterSql(filters)} AND c.tsv @@ ${tsQuery(tsText)}
         ORDER BY ts_rank_cd(c.tsv, ${tsQuery(tsText)}) DESC, c.id
-        LIMIT ${CANDIDATES}`,
-    ),
+        LIMIT ${CANDIDATES}`;
+}
+
+/** Wortsuche */
+async function textCandidates(
+  db: Db,
+  tsText: string,
+  filters: ResolvedFilters,
+  tuning: SearchTuning,
+): Promise<string[]> {
+  const rows = await withSettings(db, textSettings(tuning.workers), tuning.timeoutMs, (tx) =>
+    tx.execute<{ id: string }>(textQuery(tsText, filters)),
   );
   return rows.map((r) => r.id);
 }
@@ -374,15 +438,16 @@ async function vectorCandidates(
   vector: number[],
   model: string,
   filters: ResolvedFilters,
+  tuning: SearchTuning,
 ): Promise<string[]> {
   const maxDistance = 1 - MIN_VECTOR_SIM;
   const query = vectorQuery(vector, model, filters);
-  const rows = hasFilter(filters)
-    ? await withSettings(db, PARALLEL_SETTINGS, (tx) => tx.execute<{ id: string; dist: number }>(query))
-    : await db.transaction(async (tx) => {
-        await tx.execute(sql.raw(`SET LOCAL hnsw.ef_search = ${HNSW_EF_SEARCH}`));
-        return tx.execute<{ id: string; dist: number }>(query);
-      });
+  const settings: Setting[] = hasFilter(filters)
+    ? parallelSettings(tuning.workers)
+    : [['hnsw.ef_search', String(HNSW_EF_SEARCH)]];
+  const rows = await withSettings(db, settings, tuning.timeoutMs, (tx) =>
+    tx.execute<{ id: string; dist: number }>(query),
+  );
   return rows
     .map((r) => ({ id: r.id, dist: Number(r.dist) }))
     .filter((r) => Number.isFinite(r.dist) && r.dist <= maxDistance)
@@ -479,6 +544,10 @@ export async function search(deps: SearchDeps, input: SearchInput): Promise<Sear
   // Ein Präfix, das nichts trifft, macht die Trefferliste leer; ohne Wörter gibt es nichts zu suchen
   if (filters.unresolved.length > 0 || tsText === null) return response([], 'text', null);
 
+  const tuning: SearchTuning = {
+    workers: deps.parallelWorkers ?? DEFAULT_PARALLEL_WORKERS,
+    timeoutMs: deps.statementTimeoutMs ?? STATEMENT_TIMEOUT_MS,
+  };
   // Vektor parallel zur Wortsuche holen (Zeitlimit 800 ms im Client)
   const embedding: Promise<{ vector: number[]; model: string } | WorkerErrorCode> | null = wantsVectorSearch(
     parsed.words,
@@ -495,10 +564,10 @@ export async function search(deps: SearchDeps, input: SearchInput): Promise<Sear
     ? embedding.then(async (result) =>
         typeof result === 'string'
           ? { degraded: result }
-          : { ids: await vectorCandidates(deps.db, result.vector, result.model, filters) },
+          : { ids: await vectorCandidates(deps.db, result.vector, result.model, filters, tuning) },
       )
     : Promise.resolve(null);
-  const [textIds, vector] = await Promise.all([textCandidates(deps.db, tsText, filters), vectorPart]);
+  const [textIds, vector] = await Promise.all([textCandidates(deps.db, tsText, filters, tuning), vectorPart]);
   const vectorIds = vector && 'ids' in vector ? vector.ids : [];
   const mode: SearchResponse['mode'] = vector && 'ids' in vector ? 'hybrid' : 'text';
   const degraded: SearchResponse['degraded'] = vector && 'degraded' in vector ? vector.degraded : null;

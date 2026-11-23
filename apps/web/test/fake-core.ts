@@ -584,6 +584,8 @@ export interface FakeCore {
   searchDegraded: SearchDegraded;
   /** GET /search scheitert mit 500, solange true */
   failSearch: boolean;
+  /** `GET /search` antwortet mit `503 search_timeout` (§19.6) */
+  searchTimeout: boolean;
   /** Für GET /sessions/{id}/snapshot (VERTRAEGE §7.2): Folienwechsel und Marker, `stream_seq`/`stream_op_id` */
   slideEvents: SlideEvent[];
   markers: Marker[];
@@ -812,6 +814,7 @@ export function installFakeCore(
     searchFixtures: structuredClone(SEARCH_FIXTURE),
     searchDegraded: null,
     failSearch: false,
+    searchTimeout: false,
     slideEvents: [],
     markers: [],
     streamSeq: 0,
@@ -907,6 +910,7 @@ export function installFakeCore(
       // GET /search (§19.6): 400 ohne Suchtext, sonst Treffer aus `core.searchFixtures`
       if (path === '/search' && method === 'GET') {
         if (core.failSearch) return json({ error: { code: 'internal', message: 'x' } }, 500);
+        if (core.searchTimeout) return json({ error: { code: 'search_timeout', message: 'x' } }, 503);
         const q = url.searchParams.get('q') ?? '';
         const limit = Number(url.searchParams.get('limit') ?? 20);
         if (q.trim() === '' || q.trim().length > 200 || !(limit >= 1 && limit <= 50)) {
