@@ -1759,12 +1759,16 @@ describe('Hängendes „läuft“ nach einem Absturz (#113)', () => {
 
   it('H2: verwaiste Dateien toter Prozesse räumt das nächste Backup auf, lebende bleiben', async () => {
     const { deps, dataDir } = setup();
-    writePid(dataDir, 'backup-019a4e14-0000-7000-8000-0000000000e1', 'x', 3001);
-    writePid(dataDir, 'restore-test', 'alt', 3002);
-    writePid(dataDir, 'restore-test', 'lebt', 3003);
-    deps.alive = (pid) => pid === 3003;
+    // Der Aufräumer lässt die Datei des eigenen Prozesses immer stehen (richtig so, liveness.ts). Läuft der Test in
+    // einem Prozess, dessen echte PID zufällig 3002 ist (Vitest-Worker in einem frischen CI-Container), bliebe die
+    // „tote“ Datei darum liegen. Darum sind die PIDs aus der echten abgeleitet und ihr nie gleich.
+    const [tot1, tot2, lebt] = [process.pid + 1, process.pid + 2, process.pid + 3];
+    writePid(dataDir, 'backup-019a4e14-0000-7000-8000-0000000000e1', 'x', tot1);
+    writePid(dataDir, 'restore-test', 'alt', tot2);
+    writePid(dataDir, 'restore-test', 'lebt', lebt);
+    deps.alive = (pid) => pid === lebt;
     expect(await runBackup(deps, { trigger: 'manuell' })).toBe(0);
-    expect(readdirSync(join(dataDir, 'tmp'))).toEqual(['lauf-restore-test.3003.json']);
+    expect(readdirSync(join(dataDir, 'tmp'))).toEqual([`lauf-restore-test.${lebt}.json`]);
   });
 
   it('anderes Backup ohne PID-Datei: weiter Exit 4, Meldung mit Ausweg', async () => {
