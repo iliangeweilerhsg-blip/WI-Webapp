@@ -39,6 +39,23 @@ const v2files = loadV2Fixtures().flatMap((f) => f.strokes);
 const page07 = files.find((f) => f.name.startsWith('07'))!.strokes;
 const marker04 = files.find((f) => f.name.startsWith('04'))!.strokes;
 
+/**
+ * Wie viel langsamer als der Entwicklerrechner ist diese Maschine gerade (mindestens 1)? Gemessen am Minimum mehrerer
+ * Läufe einer festen Rechenschleife (etwa 7,5 ms unter Vitest lokal). Zeitgrenzen der Tests wachsen damit, ein echter Einbruch fällt
+ * trotzdem auf, weil die Schleife davon unberührt bleibt (#391).
+ */
+function machineSlowdown(): number {
+  let best = Infinity;
+  for (let k = 0; k < 9; k++) {
+    const t = performance.now();
+    let x = 0;
+    for (let i = 0; i < 3e6; i++) x += Math.sqrt(i) * 1.0001;
+    const dt = performance.now() - t;
+    if (x >= 0 && dt < best) best = dt;
+  }
+  return Math.max(1, best / 7.5);
+}
+
 let log: CanvasLog;
 beforeEach(() => {
   log = installCanvasMock();
@@ -247,11 +264,15 @@ describe('<InkPage>', () => {
 
   it('300 Striche: Neuzeichnen bleibt weit unter einem Frame-Budget-Vielfachen', () => {
     // 299 Striche aus allen Dateien, Umrisse werden beim ersten Mal berechnet, danach nur gefüllt
+    const slow = machineSlowdown();
     const { rerender } = render(<InkPage strokes={all} width={600} />);
-    const t0 = performance.now();
-    rerender(<InkPage strokes={[...all]} width={601} />); // Größenwechsel erzwingt volles Neuzeichnen aus dem Cache
-    const warm = performance.now() - t0;
-    expect(warm).toBeLessThan(250);
+    let warm = Infinity;
+    for (let k = 0; k < 5; k++) {
+      const t0 = performance.now();
+      rerender(<InkPage strokes={[...all]} width={601 + (k % 2)} />); // Größenwechsel erzwingt volles Neuzeichnen aus dem Cache
+      warm = Math.min(warm, performance.now() - t0); // Minimum: Störungen machen einen Lauf nur langsamer (#391)
+    }
+    expect(warm).toBeLessThan(250 * slow);
   });
 
   it('zeichnet ein unbekanntes Werkzeug wie den Stift und begrenzt absurde Breiten', () => {
@@ -358,7 +379,7 @@ describe('redrawRegion Zwischen-Canvas', () => {
 
 describe('v1 bleibt unverändert (Dateien 01 bis 07)', () => {
   it('Umrisse und Ränder der 299 Striche sind Zeichen für Zeichen die von vor V2-2', () => {
-    // Prüfsumme aus dem Stand VOR V2-2 (gleiche Rundung). Ändert sich der v1-Pfad absichtlich (V2-5), neu bestimmen.
+    // Prüfsumme aus dem Stand VOR V2-2 (gleiche Rundung). V2-5 hat sie bewusst neu bestimmt (Median-Verankerung, size 1,0); ändert sich der v1-Pfad wieder absichtlich, neu bestimmen.
     const round = (_: string, v: unknown) => (typeof v === 'number' ? Math.round(v * 1e4) / 1e4 : v);
     const sum = (fn: (d: ReturnType<typeof decodeStroke>) => unknown) => {
       const h = createHash('sha256');
@@ -366,8 +387,8 @@ describe('v1 bleibt unverändert (Dateien 01 bis 07)', () => {
       return h.digest('hex').slice(0, 16);
     };
     expect(all).toHaveLength(299);
-    expect(sum(strokeOutline)).toBe('df9560373e8bfa64');
-    expect(sum(strokeBounds)).toBe('9f359413cbf22a04');
+    expect(sum(strokeOutline)).toBe('ee75a94f025bf4d4');
+    expect(sum(strokeBounds)).toBe('5999a05dcec3b7e9');
   });
 
   it('v1-Striche zeichnen über perfect-freehand und quadraticCurveTo, ohne Kreise', () => {
@@ -868,19 +889,29 @@ describe('Strichformat v2: Form aus dem Durchmesser je Punkt', () => {
           transform: [1, 0, 0, 1, (i * 37) % 300, (i * 53) % 500],
         }) as Stroke,
     );
+    // Robust gegen eine langsame oder gestörte CI-Maschine (#391), ohne einen echten Einbruch zu verpassen:
+    //  - gemessen wird das Minimum mehrerer Läufe (Störungen machen einen Lauf nur langsamer, nie schneller),
+    //  - die Grenzen wachsen mit der Geschwindigkeit der Maschine, gemessen an einer festen Rechenschleife.
+    // Lokal liegt das Minimum bei etwa 40 bis 50 ms, die Grenze bei 120 ms: Ein Faktor 3 fällt auf.
+    const slow = machineSlowdown();
     const { rerender } = render(<InkPage strokes={[]} width={600} />);
     const t0 = performance.now();
     rerender(<InkPage strokes={strokes} width={600} />); // dekodiert, baut die Formen, zeichnet
     const cold = performance.now() - t0;
     expect(log.fills.length).toBeGreaterThanOrEqual(300);
-    log.reset();
-    const t1 = performance.now();
-    rerender(<InkPage strokes={[...strokes]} width={601} />); // Größenwechsel: alles neu, Formen aus dem Cache
-    const warm = performance.now() - t1;
-    expect(log.fills).toHaveLength(300);
-    expect(log.count('arc')).toBeGreaterThan(300);
-    expect(warm).toBeLessThan(250);
-    expect(cold).toBeLessThan(1500);
+    const runs: number[] = [];
+    for (let k = 0; k < 9; k++) {
+      log.reset();
+      const t1 = performance.now();
+      rerender(<InkPage strokes={[...strokes]} width={601 + (k % 2)} />); // Größenwechsel: alles neu, Formen aus dem Cache
+      runs.push(performance.now() - t1);
+      expect(log.fills).toHaveLength(300);
+      expect(log.count('arc')).toBeGreaterThan(300);
+    }
+    const warm = Math.min(...runs);
+    expect(warm).toBeLessThan(120 * slow);
+    // Der erste Lauf ist einmalig (nicht wiederholbar), darum die großzügigere Grenze; lokal etwa 200 ms
+    expect(cold).toBeLessThan(1500 * slow);
   });
 });
 
@@ -1170,5 +1201,201 @@ describe('Strichformat v2: überflüssige Scheiben und Zwischenpunkte entfallen 
     expect(probes).toBeGreaterThan(100000);
     // Die Fasen sind im Spiel: ohne sie gäbe es hier nichts zu prüfen
     expect(tris).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Strichformat v2, Ticket V2-5: Schätzung für v1-Striche (VERTRAEGE §23.8). Das ist eine SCHÄTZUNG, keine Messung.
+
+describe('V2-5: v1-Striche werden am Median von force verankert', () => {
+  const base = files[0]!.strokes[0]!;
+  let n = 5000;
+
+  /** v1-Strich (ohne sizes) entlang der x-Achse von 0 bis `len`, je Punkt eine force aus `forces`. */
+  function v1(tool: Stroke['tool'], forces: readonly number[], width = 4, len = 100): Stroke {
+    const pb = Buffer.alloc(forces.length * 24);
+    forces.forEach((f, i) => {
+      pb.writeFloatLE((len * i) / (forces.length - 1), i * 24);
+      pb.writeFloatLE(50, i * 24 + 4);
+      pb.writeFloatLE(i * 5, i * 24 + 8);
+      pb.writeFloatLE(f, i * 24 + 12);
+    });
+    const { sizes: _sizes, ...rest } = base as Stroke & { sizes?: string };
+    return {
+      ...rest,
+      client_id: `019a4e14-0000-7000-8000-${String(n++).padStart(12, '0')}`,
+      tool,
+      layer: tool === 'marker' ? 'highlight' : 'ink',
+      color: '#1E2A44FF',
+      width,
+      transform: [1, 0, 0, 1, 0, 0],
+      points: pb.toString('base64'),
+    } as Stroke;
+  }
+  const same = (v: number, k = 50) => Array.from({ length: k }, () => v);
+
+  /** Breite des Umrisses an der Stelle x: Höhe der Umrisspunkte in einem schmalen Streifen um x (gerader Strich) */
+  function widthAt(s: Stroke, x: number, strip = 6): number {
+    const ys = strokeOutline(decodeStroke(s))
+      .filter((p) => Math.abs(p[0]! - x) <= strip)
+      .map((p) => p[1]!);
+    return Math.max(...ys) - Math.min(...ys);
+  }
+  const widest = (s: Stroke) => {
+    const ys = strokeOutline(decodeStroke(s)).map((p) => p[1]!);
+    return Math.max(...ys) - Math.min(...ys);
+  };
+
+  it('Füller mit force überall 0,2 (und 0,8), width 4: in der Mitte 4 pt breit (±0,2)', () => {
+    for (const f of [0.2, 0.8])
+      expect(Math.abs(widthAt(v1('fountain', same(f)), 50) - 4)).toBeLessThanOrEqual(0.2);
+    // unabhängig vom geratenen Teiler: dasselbe bei anderer Größenordnung von force und anderer width
+    expect(Math.abs(widthAt(v1('fountain', same(0.05), 10), 50) - 10)).toBeLessThanOrEqual(0.2);
+  });
+
+  it('Bleistift mit gleichmäßigem force ist ebenfalls width breit', () => {
+    expect(Math.abs(widthAt(v1('pencil', same(0.3)), 50) - 4)).toBeLessThanOrEqual(0.2);
+  });
+
+  it('alle force = 0: kein Fehler, Druck 0,5, also Durchmesser width', () => {
+    for (const tool of ['fountain', 'pen', 'pencil'] as const) {
+      const s = v1(tool, same(0), 4);
+      expect(() => strokeOutline(decodeStroke(s))).not.toThrow();
+      expect(Math.abs(widthAt(s, 50) - 4)).toBeLessThanOrEqual(0.2);
+    }
+  });
+
+  it('Punkte mit force = 0 zählen nicht zum Median', () => {
+    // 30 Nullen und 20 Punkte mit 0,4: Median der Punkte mit force > 0 ist 0,4, also Druck 0,5 dort
+    const s = v1('fountain', [...same(0, 30), ...same(0.4, 20)]);
+    expect(Math.abs(widthAt(s, 90) - 4)).toBeLessThanOrEqual(0.3);
+  });
+
+  it('die Schwankung um den Mittelwert bleibt: bei geradem Umfang zählt das Mittel der beiden mittleren Werte', () => {
+    // 25 × 0,1 und 25 × 0,2: m = 0,15, Druck 1/3 und 2/3, Durchmesser (Füller, thinning 1) 2·p·width = 2,67 und 5,33
+    const s = v1('fountain', [...same(0.1, 25), ...same(0.2, 25)]);
+    expect(Math.abs(widthAt(s, 20) - 8 / 3)).toBeLessThan(0.4);
+    expect(Math.abs(widthAt(s, 80) - 16 / 3)).toBeLessThan(0.4);
+  });
+
+  it('Kugelschreiber mit force von 0 bis 1 bei Median 0,2: nirgends breiter als 1,34 × width (±0,1)', () => {
+    const forces = [...same(0.2, 40), 0.4, 0.6, 0.8, 1, 1, 1, 1, 1, 1, 1];
+    const s = v1('pen', forces);
+    expect(widest(s)).toBeLessThanOrEqual(1.34 * 4 + 0.1);
+    expect(widest(s)).toBeGreaterThan(1.1 * 4);
+  });
+
+  it('Kugelschreiber: nirgends schmaler als 0,66 × width, auch bei force nahe 0 im Strich', () => {
+    const low = v1('pen', [...same(0.01, 10), ...same(0.2, 40)]);
+    expect(widthAt(low, 5, 4)).toBeGreaterThanOrEqual(0.66 * 4 - 0.1);
+  });
+
+  it('Füller darf bis (1 + thinning) × width wachsen, Kugelschreiber nicht', () => {
+    const forces = [...same(0.2, 40), ...same(1, 10)];
+    expect(widest(v1('fountain', forces))).toBeGreaterThan(1.34 * 4 + 0.3);
+    expect(widest(v1('pen', forces))).toBeLessThanOrEqual(1.34 * 4 + 0.1);
+  });
+
+  it('ToolStyle: size ist 1,0 für pen, fountain und pencil; monoline und marker ohne Schätzung', () => {
+    for (const t of ['pen', 'fountain', 'pencil'] as const) {
+      expect(TOOL_STYLES[t].size).toBe(1);
+      expect(TOOL_STYLES[t].pressure).not.toBeNull();
+    }
+    expect(TOOL_STYLES.pen.pressure).toEqual({ min: 0.3, max: 0.7 });
+    expect(TOOL_STYLES.monoline.pressure).toBeNull();
+    expect(TOOL_STYLES.marker.pressure).toBeNull();
+  });
+
+  it('monoline und marker bleiben unverändert: Breite width, force spielt keine Rolle', () => {
+    for (const tool of ['monoline', 'marker'] as const) {
+      const a = widthAt(v1(tool, same(0.05), 6), 50);
+      const b = widthAt(v1(tool, [...same(0.2, 25), ...same(0.9, 25)], 6), 50);
+      expect(Math.abs(a - 6)).toBeLessThanOrEqual(0.2);
+      expect(Math.abs(b - 6)).toBeLessThanOrEqual(0.2);
+    }
+  });
+
+  it('v2-Striche bleiben unverändert: sie zeichnen ohne perfect-freehand und ohne die Schätzung', () => {
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    const before = vi.mocked(getStroke).mock.calls.length;
+    for (const s of v2files) drawStroke(ctx, decodeStroke(s));
+    expect(vi.mocked(getStroke).mock.calls.length).toBe(before);
+  });
+});
+
+describe('V2-5: v1-Strich aus einem einzigen Punkt', () => {
+  const base = files[0]!.strokes[0]!;
+  function dot(tool: Stroke['tool'], k = 1, width = 6): Stroke {
+    const pb = Buffer.alloc(k * 24);
+    for (let i = 0; i < k; i++) {
+      pb.writeFloatLE(20 + i * 0.001, i * 24);
+      pb.writeFloatLE(30, i * 24 + 4);
+      pb.writeFloatLE(i, i * 24 + 8);
+      pb.writeFloatLE(0.3, i * 24 + 12);
+    }
+    const { sizes: _s, ...rest } = base as Stroke & { sizes?: string };
+    return {
+      ...rest,
+      tool,
+      layer: tool === 'marker' ? 'highlight' : 'ink',
+      color: '#1E2A44FF',
+      width,
+      transform: [1, 0, 0, 1, 0, 0],
+      points: pb.toString('base64'),
+    } as Stroke;
+  }
+  const pathCalls = () => log.calls.filter((c) => c.name === 'moveTo' || c.name === 'lineTo');
+
+  it('jedes Werkzeug zeichnet eine Scheibe mit Durchmesser width (Radius 3 bei width 6), der Füller auch', () => {
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    for (const tool of ['pen', 'fountain', 'pencil', 'monoline'] as const) {
+      log.reset();
+      drawStroke(ctx, decodeStroke(dot(tool)));
+      expect(log.count('arc'), tool).toBe(1);
+      expect(log.calls.find((c) => c.name === 'arc')!.args.slice(0, 3), tool).toEqual([20, 30, 3]);
+      expect(log.count('moveTo'), tool).toBe(1);
+      expect(log.fills, tool).toHaveLength(1);
+    }
+  });
+
+  it('Textmarker: Quadrat mit Kantenlänge width, ohne Kreis', () => {
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    log.reset();
+    drawStroke(ctx, decodeStroke(dot('marker')));
+    expect(log.count('arc')).toBe(0);
+    expect(pathCalls()).toHaveLength(4);
+    const xs = pathCalls().map((c) => c.args[0] as number);
+    const ys = pathCalls().map((c) => c.args[1] as number);
+    expect(Math.max(...xs) - Math.min(...xs)).toBe(6);
+    expect(Math.max(...ys) - Math.min(...ys)).toBe(6);
+    expect(log.fills).toHaveLength(1);
+  });
+
+  it('mehrere Punkte auf einem Fleck (unter 0,01 pt) gelten wie bei v2 als ein Punkt; perfect-freehand läuft nicht', () => {
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    const before = vi.mocked(getStroke).mock.calls.length;
+    log.reset();
+    drawStroke(ctx, decodeStroke(dot('fountain', 3)));
+    expect(log.count('arc')).toBe(1);
+    expect(vi.mocked(getStroke).mock.calls.length).toBe(before);
+  });
+
+  it('zwei Punkte mit echtem Abstand zeichnen weiter über den Umriss', () => {
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    const s = dot('pen', 2);
+    const buf = Buffer.from(s.points, 'base64');
+    buf.writeFloatLE(25, 24);
+    log.reset();
+    drawStroke(ctx, decodeStroke({ ...s, points: buf.toString('base64') }));
+    expect(log.count('arc')).toBe(0);
+    expect(log.count('quadraticCurveTo')).toBeGreaterThan(2);
+  });
+
+  it('strokeBounds des Punkts schließt die Scheibe ein', () => {
+    const b = strokeBounds(decodeStroke(dot('fountain')));
+    expect(b.x0).toBeLessThanOrEqual(17);
+    expect(b.x1).toBeGreaterThanOrEqual(23);
+    expect(b.y0).toBeLessThanOrEqual(27);
+    expect(b.y1).toBeGreaterThanOrEqual(33);
   });
 });
