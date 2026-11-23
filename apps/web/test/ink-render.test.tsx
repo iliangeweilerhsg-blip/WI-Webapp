@@ -39,6 +39,23 @@ const v2files = loadV2Fixtures().flatMap((f) => f.strokes);
 const page07 = files.find((f) => f.name.startsWith('07'))!.strokes;
 const marker04 = files.find((f) => f.name.startsWith('04'))!.strokes;
 
+/**
+ * Wie viel langsamer als der Entwicklerrechner ist diese Maschine gerade (mindestens 1)? Gemessen am Minimum mehrerer
+ * Läufe einer festen Rechenschleife (etwa 7,5 ms unter Vitest lokal). Zeitgrenzen der Tests wachsen damit, ein echter Einbruch fällt
+ * trotzdem auf, weil die Schleife davon unberührt bleibt (#391).
+ */
+function machineSlowdown(): number {
+  let best = Infinity;
+  for (let k = 0; k < 9; k++) {
+    const t = performance.now();
+    let x = 0;
+    for (let i = 0; i < 3e6; i++) x += Math.sqrt(i) * 1.0001;
+    const dt = performance.now() - t;
+    if (x >= 0 && dt < best) best = dt;
+  }
+  return Math.max(1, best / 7.5);
+}
+
 let log: CanvasLog;
 beforeEach(() => {
   log = installCanvasMock();
@@ -247,11 +264,15 @@ describe('<InkPage>', () => {
 
   it('300 Striche: Neuzeichnen bleibt weit unter einem Frame-Budget-Vielfachen', () => {
     // 299 Striche aus allen Dateien, Umrisse werden beim ersten Mal berechnet, danach nur gefüllt
+    const slow = machineSlowdown();
     const { rerender } = render(<InkPage strokes={all} width={600} />);
-    const t0 = performance.now();
-    rerender(<InkPage strokes={[...all]} width={601} />); // Größenwechsel erzwingt volles Neuzeichnen aus dem Cache
-    const warm = performance.now() - t0;
-    expect(warm).toBeLessThan(250);
+    let warm = Infinity;
+    for (let k = 0; k < 5; k++) {
+      const t0 = performance.now();
+      rerender(<InkPage strokes={[...all]} width={601 + (k % 2)} />); // Größenwechsel erzwingt volles Neuzeichnen aus dem Cache
+      warm = Math.min(warm, performance.now() - t0); // Minimum: Störungen machen einen Lauf nur langsamer (#391)
+    }
+    expect(warm).toBeLessThan(250 * slow);
   });
 
   it('zeichnet ein unbekanntes Werkzeug wie den Stift und begrenzt absurde Breiten', () => {
@@ -868,19 +889,29 @@ describe('Strichformat v2: Form aus dem Durchmesser je Punkt', () => {
           transform: [1, 0, 0, 1, (i * 37) % 300, (i * 53) % 500],
         }) as Stroke,
     );
+    // Robust gegen eine langsame oder gestörte CI-Maschine (#391), ohne einen echten Einbruch zu verpassen:
+    //  - gemessen wird das Minimum mehrerer Läufe (Störungen machen einen Lauf nur langsamer, nie schneller),
+    //  - die Grenzen wachsen mit der Geschwindigkeit der Maschine, gemessen an einer festen Rechenschleife.
+    // Lokal liegt das Minimum bei etwa 40 bis 50 ms, die Grenze bei 120 ms: Ein Faktor 3 fällt auf.
+    const slow = machineSlowdown();
     const { rerender } = render(<InkPage strokes={[]} width={600} />);
     const t0 = performance.now();
     rerender(<InkPage strokes={strokes} width={600} />); // dekodiert, baut die Formen, zeichnet
     const cold = performance.now() - t0;
     expect(log.fills.length).toBeGreaterThanOrEqual(300);
-    log.reset();
-    const t1 = performance.now();
-    rerender(<InkPage strokes={[...strokes]} width={601} />); // Größenwechsel: alles neu, Formen aus dem Cache
-    const warm = performance.now() - t1;
-    expect(log.fills).toHaveLength(300);
-    expect(log.count('arc')).toBeGreaterThan(300);
-    expect(warm).toBeLessThan(250);
-    expect(cold).toBeLessThan(1500);
+    const runs: number[] = [];
+    for (let k = 0; k < 9; k++) {
+      log.reset();
+      const t1 = performance.now();
+      rerender(<InkPage strokes={[...strokes]} width={601 + (k % 2)} />); // Größenwechsel: alles neu, Formen aus dem Cache
+      runs.push(performance.now() - t1);
+      expect(log.fills).toHaveLength(300);
+      expect(log.count('arc')).toBeGreaterThan(300);
+    }
+    const warm = Math.min(...runs);
+    expect(warm).toBeLessThan(120 * slow);
+    // Der erste Lauf ist einmalig (nicht wiederholbar), darum die großzügigere Grenze; lokal etwa 200 ms
+    expect(cold).toBeLessThan(1500 * slow);
   });
 });
 
