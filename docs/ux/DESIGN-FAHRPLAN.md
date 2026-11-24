@@ -69,7 +69,7 @@ Claude macht keine Gestaltungsvorschläge oder Optionslisten, außer du fragst a
 - [ ] **Wichtigste Abläufe:** die 3–5 häufigsten Wege Schritt für Schritt, z. B. „Vorlesung mitschreiben“ oder „Lücke zum Lernen nutzen“.
 - [ ] **Hierarchie pro Bildschirm:** Was ist das Wichtigste, was das Zweitwichtigste, was darf versteckt sein?
 - [ ] **Wireframes in Graustufen** für die Schlüssel-Bildschirme.
-- [ ] **Web und iPad:** Was ist gleich, was unterscheidet sich?
+- [ ] **Geräte (iPhone, iPad, Mac):** Was ist gleich, was unterscheidet sich? Das iPhone ist im bisherigen Konzept nicht vorgesehen, siehe [Markenkern, offene Punkte](MARKENKERN.md).
 
 **Ergebnis:** Struktur-Dokument und Wireframes
 
