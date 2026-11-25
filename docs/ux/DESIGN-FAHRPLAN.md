@@ -13,6 +13,8 @@ Diese Liste führt Schritt für Schritt durch die Gestaltung der App, so wie ein
 
 Claude macht keine Gestaltungsvorschläge oder Optionslisten, außer du fragst ausdrücklich danach. Wenn du willst, setzt Claude deine Ideen sichtbar um, ohne eigene Richtung hineinzulegen.
 
+Jede Entscheidung wird mit ihren Alternativen in [DESIGN-ENTSCHEIDUNGEN.md](DESIGN-ENTSCHEIDUNGEN.md) festgehalten.
+
 **Legende:** `[ ]` offen · `[x]` freigegeben · ⛳ Freigabe-Tor am Ende jeder Phase
 
 ---
@@ -23,7 +25,7 @@ Claude macht keine Gestaltungsvorschläge oder Optionslisten, außer du fragst a
 
 - [x] **Für wen und in welcher Lage:** Wer nutzt die App, wann, wo, in welcher Stimmung?
 - [x] **Gefühlsmomente:** Wie soll es sich anfühlen, die App in typischen Situationen zu öffnen?
-- [ ] **Markenattribute:** 3–5 Eigenschaften, die die App ausstrahlen soll, jeweils mit Bedeutung und Gegenteil.
+- [x] **Markenattribute:** 3–5 Eigenschaften, die die App ausstrahlen soll, jeweils mit Bedeutung und Gegenteil.
 - [ ] **Abgrenzung:** Wie soll die App auf keinen Fall wirken?
 - [ ] **Design-Prinzipien:** wenige Leitsätze, die bei späteren Streitfragen entscheiden.
 - [ ] **Name und Zeichen:** Bleibt der Name? Braucht es ein Logo oder Icon?
