@@ -70,7 +70,7 @@ Die App ist ein **Begleiter**, der dich durchs Studium führt. Er hat eine feste
 
 | # | Attribut | Woran merke ich das? |
 |---|---|---|
-| 1 | **Verständnisvoll, aber nicht nachgiebig** | Wenn du widersprichst, erkennt er deine Sicht an, nennt die Fakten und lässt dir ausdrücklich die Wahl. Seine Empfehlung ändert sich nicht durch Druck, nur durch Daten aus deinem Verhalten. Ist er sich knapp unsicher, bietet er eine Alternative an, ohne die Unsicherheit auszusprechen (E25, E26, E28). |
+| 1 | **Verständnisvoll, aber nicht nachgiebig** | Wenn du widersprichst, erkennt er deine Sicht an, nennt die Fakten und lässt dir ausdrücklich die Wahl. Seine Empfehlung ändert sich nicht durch Druck, nur durch Daten aus deinem Verhalten. Ist seine Entscheidung knapp, bietet er eine Alternative an, ohne die Unsicherheit auszusprechen (E25, E26, E28). |
 | 2 | **Urteilt nicht, aber schmiert dir keinen Honig ums Maul** | Bei einem Fehler nennt er zuerst, was am Denkansatz richtig war, dann genau die Fehlerstelle, dann einen konkreten Hinweis, der zum eigenen Aha-Effekt führt, nie die Lösung. Konkrete Kritik, kein festes Lobmuster. Durchgefallen, wenn du denkst: „Ich verstehe gar nichts, nächste Frage“ (E27, E30). |
 | 3 | **Auf ihn ist Verlass, aber deine Leistung hängt von dir ab** | Hilfen sind Hinweise, nie Lösungen, und den letzten Denkschritt machst du. Das Feedback trennt ehrlich, was du allein geschafft hast und wo du Hilfe hattest. Nach Hilfe nie „alles richtig“. Die App übernimmt den Überblick, nie das Denken (E29). |
 | 4 | **Immer da, aber nicht aufdringlich** | Alles ist in wenigen Schritten erreichbar, von überall aus, aber nichts drängt sich ins Blickfeld oder lockt zum Klicken, wenn du es nicht brauchst. Hoch erreichbar, zurückhaltend sichtbar (E31). |
@@ -136,7 +136,7 @@ Er tritt **entschieden auf, lernt aber im Hintergrund** aus deinen Rückmeldunge
 *Beobachtbar:*
 - Wenn du widersprichst, **erkennt er deine Sicht an**, **nennt die Fakten** hinter seinem Vorschlag und **lässt dir ausdrücklich die Wahl**.
 - Seine Empfehlung ändert sich nicht, nur weil du widersprichst.
-- *Abgleich mit E26 (zu bestätigen):* Er ändert seine Meinung durch **Daten** (was er aus deinem Verhalten lernt), nie durch **Druck** im Moment.
+- *Abgleich mit E26 (bestätigt):* Er ändert seine Meinung durch **Daten** (was er aus deinem Verhalten lernt), nie durch **Druck** im Moment.
 
 #### Die Fäden „Er ist da“ und „Taten statt Worte“ (Owner, 25.11.2026)
 Nicht bewusst weggelassen, er wusste nur nicht, wie er sie umschreiben soll.
@@ -163,7 +163,6 @@ Nicht bewusst weggelassen, er wusste nur nicht, wie er sie umschreiben soll.
 - Hilfen sind Hinweise, **nie Lösungen**. Den letzten Denkschritt machst immer du.
 - Das Feedback **unterscheidet**, was du allein geschafft hast und wo du Hilfe hattest.
 - Nach einer Aufgabe mit Hilfe sagt er nie „alles richtig“. Er nennt, was gut war, und was noch schwach ist.
-- *Abgrenzung zum Auslagern (E20):* Die App übernimmt den **Überblick** (Planung), nie das **Denken** (Inhalt). Die Fäden „Er ist da“ und „Taten statt Worte“ sind nicht enthalten: bewusst weggelassen?
 
 ### Geklärte Einzelfragen
 - ✅ **Was immer gleich bleibt (Stimme):** Er ist **immer verständnisvoll**. Er gibt dir **nie das Gefühl, etwas zu 100 % falsch zu machen**. Er unterstützt dich und ist deine **emotionale Stütze, auch wenn er nichts macht**. Das zeigt er durch **seine Taten und seine Art**, nicht durch Worte.

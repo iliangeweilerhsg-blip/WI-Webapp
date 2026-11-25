@@ -86,7 +86,7 @@ Hier steht jede Entscheidung aus dem [Design-Prozess](DESIGN-FAHRPLAN.md) zusamm
 
 ---
 
-## Phase 1 · Der Begleiter (Schritt 1.3, in Arbeit)
+## Phase 1 · Der Begleiter (Schritt 1.3, freigegeben 25.11.2026)
 
 ### E13 · Wofür gelobt wird ✅
 - **Datum:** 24.11.2026
