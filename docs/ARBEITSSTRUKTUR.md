@@ -1,6 +1,6 @@
 # Arbeitsstruktur: Bereiche, Rollen und gemeinsames Gedächtnis
 
-> **Status: Entwurf zur Freigabe durch den Owner.** Bis zur Freigabe gelten weiter `CLAUDE.md`, `AGENTS.md` und `docs/KOLLABORATION.md`. Nach der Freigabe ersetzt dieses Dokument dort die Abschnitte zu Lead, Tagesrhythmus und Ruhemodus. Was weiter gilt, steht in Abschnitt 10.
+> **Status: vom Owner freigegeben am 26.11.2026, Pilotphase.** Dieses Dokument ersetzt in `docs/KOLLABORATION.md` die Abschnitte zu Lead-Session, Tagesrhythmus und Ruhemodus. Was weiter gilt, steht in Abschnitt 10.
 
 ## 1. Warum umbauen
 
@@ -219,7 +219,9 @@ Vorlage für einen Eintrag:
 
 - **Kein Stundentakt.** Arbeit startet, wenn der Owner ein Gespräch führt oder ein Ereignis eintritt: CI fertig, Review da, Merge. PR-Abos laufen wie bisher und enden nach dem Merge.
 - **Pfleger:** einmal täglich, frische Session, günstiges Modell. Ohne Änderungen seit dem letzten Lauf beendet er sich sofort.
-- **Wochenrunde, jeden Mittwoch:** Mittwochs wird das Wochenlimit des Owners zurückgesetzt, also sind Credits sicher verfügbar. Arbeitsintensives wie neue Bau-Sessions plant man darum eher an den Wochenanfang ab Mittwoch. Der Architekt schreibt eine Seite für den Owner mit vier Teilen: was fertig ist, was hakt, welche Entscheidungen anstehen und welche neuen Ideen sortiert werden müssen.
+  - *Vorschlag, braucht die Freigabe des Owners:* Pfleger-PRs, die **nur** `docs/UEBERSICHT.md`, `docs/bereiche/*/STAND.md` oder `docs/IDEEN.md` ändern, merged der Pfleger bei grüner CI ohne eigenes Review. *Warum:* Sonst kostet jeder tägliche Lauf zusätzlich ein Review, oder die Übersicht bleibt bis zur nächsten Architekt-Session liegen. Das Risiko ist gering, weil dabei weder Code noch Regeln geändert werden.
+- **Sessions und Fenster:** Namensschema, Lebensdauer und Abschluss mit „Ende“ stehen in [`bereiche/START.md`](bereiche/START.md). Jede Session ist zum Wegwerfen, weil das Gedächtnis im Repo liegt.
+- **Wochenrunde, jeden Mittwoch:** Mittwochs wird das Wochenlimit des Owners zurückgesetzt, also sind Credits sicher verfügbar. Arbeitsintensives wie neue Bau-Sessions plant man darum in die Tage direkt nach Mittwoch, gegen Ende der Woche laufen eher Gespräche und Kleines. Der Architekt schreibt eine Seite für den Owner mit vier Teilen: was fertig ist, was hakt, welche Entscheidungen anstehen und welche neuen Ideen sortiert werden müssen.
 
 *Warum:* Der Takt hat Stunden ohne Arbeit bezahlt. Ereignisse kosten nur, wenn etwas zu tun ist.
 
@@ -268,9 +270,12 @@ Unverändert gelten:
 
 ## 12. Offene Fragen an den Owner
 
-Geklärt: sechs Bereiche, gestaltung ist dabei (Owner, 26.11.). Grundsätzliche Änderungen laufen über die Spezifikation und den Architekten.
+Geklärt (Owner, 26.11.):
+- sechs Bereiche, gestaltung ist dabei
+- grundsätzliche Änderungen laufen über die Spezifikation und den Architekten
+- der Owner startet die Sessions selbst, mit den Startnachrichten aus `bereiche/START.md`
 
 Offen, jeweils mit Vorschlag:
 1. ~~Pilot-Bereiche~~: lernen und wissen (Owner, 26.11.).
 2. ~~Tag der Wochenrunde~~: **Mittwoch** (Owner, 26.11.). Dann wird das Wochenlimit zurückgesetzt, und es sind sicher Credits da. Am Sonntag kann das Limit schon aufgebraucht sein.
-3. Wer startet die Sessions? *Vorschlag:* der Owner selbst in claude.ai/code, mit den Startnachrichten aus `START.md`. Er behält so die Kontrolle, und keine Session läuft ohne Anlass.
+3. Darf der Pfleger seine reinen Übersichts-PRs bei grüner CI selbst mergen? (Abschnitt 8)
