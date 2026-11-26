@@ -12,7 +12,7 @@ Status: ruht (nicht im Pilot). Offen ist nur der Gerätetest zu #388.
 - Anleitungen: [IPAD.md](../../anleitungen/IPAD.md), [VORLESUNGSTAG.md](../../anleitungen/VORLESUNGSTAG.md), [TRANSKRIPTION.md](../../anleitungen/TRANSKRIPTION.md).
 
 ## Läuft
-- #324 H-3 (iPad-Teil) – kann jetzt angegangen werden, weil #388 gemergt ist.
+- #324 H-3 (iPad-Teil) – nicht mehr blockiert, weil #388 gemergt ist. Startet, sobald der Bereich wieder aktiv ist.
 - #79 – Ink-Renderer. Code erledigt, wartet auf die Messung des Owners (Zoom 1 und 2, Chrome und Safari).
 
 ## Fertig seit letzter Übersicht
