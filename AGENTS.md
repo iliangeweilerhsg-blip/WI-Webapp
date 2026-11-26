@@ -12,6 +12,8 @@ Diese Datei gilt für **alle** Agenten. `CLAUDE.md` und `GEMINI.md` ergänzen nu
 | **Spezialist** (pausiert) | Argon (Gemini 4 Argon) | Google Antigravity (Gemini-Abo, auf dem Rechner des Owners) | Bearbeitet die Issue-Queue mit Label `agent:argon`. **Seit 11.11.2026 pausiert**, es arbeitet nur Claude mit Subagents |
 | **Worker** | Claude-Subagents | vom Lead gestartet, eigene Worktrees/Branches | Parallele Feature-Arbeit |
 
+**Seit 26.11.2026** ist die Arbeit nach Bereichen geschnitten. Es gibt Architekt, Bereichs-Leads, Worker, Reviewer und Pfleger, siehe [`docs/ARBEITSSTRUKTUR.md`](docs/ARBEITSSTRUKTUR.md). Den Stand findest du in [`docs/UEBERSICHT.md`](docs/UEBERSICHT.md).
+
 Claude und Argon können sich nicht direkt aufrufen. **GitHub ist die einzige Schnittstelle:**
 Aufgaben sind Issues, Ergebnisse sind Pull Requests, Feedback sind Kommentare.
 Details: [`docs/KOLLABORATION.md`](docs/KOLLABORATION.md).

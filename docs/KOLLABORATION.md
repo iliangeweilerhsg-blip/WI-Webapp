@@ -1,5 +1,9 @@
 # Zusammenarbeit: Claude (Lead) × Claude-Subagents (Argon pausiert)
 
+> **Neue Arbeitsstruktur seit 26.11.2026:** [`ARBEITSSTRUKTUR.md`](ARBEITSSTRUKTUR.md) mit Bereichen, Rollen und gemeinsamem Gedächtnis.
+> Sie ersetzt hier „Lead-Session“, „Autonom weiterarbeiten“, den Ruhemodus und „Fragen an den Owner … in #188“ (§4a) sowie den Tagesrhythmus (§6). Fragen bündelt jetzt der Architekt zur Wochenrunde am Mittwoch, die Übersicht ist [`UEBERSICHT.md`](UEBERSICHT.md). Wo unten „Claude (Lead)“ steht, ist die jeweils zuständige Rolle aus der Arbeitsstruktur gemeint.
+> Alles andere gilt weiter: Modell-Routing (§4), Review-Stufen, Nachrunden, Cache-Regel und Aufträge an Subagents (§4a), parallele Arbeit (§5).
+
 Stand: 11. November 2026 · Betrieb **nur über Abos**, keine API-Keys.
 
 > **Argon ist pausiert (Owner-Entscheidung vom 11.11.2026).** Das Projekt arbeitet ohne Argon.
