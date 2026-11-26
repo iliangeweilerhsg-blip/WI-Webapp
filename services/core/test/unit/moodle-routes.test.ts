@@ -1,6 +1,6 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ApiErrorSchema,
   MoodleActionCatalogSchema,
@@ -41,10 +41,17 @@ const ALL_FUNCTIONS = [
   'core_message_mark_all_notifications_as_read',
 ];
 
+// Feste Uhr: `token_valid_until` der Testdaten ist 2027-01-27; der Status kippt 7 Tage vorher (ab 20.01.2027) auf
+// `laeuft_bald_ab` – mit echter Uhr wären die Tests ab Mitte Januar 2027 rot. Nur Date wird gefälscht.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-12T12:00:00Z') });
+});
+
 let app: FastifyInstance | undefined;
 afterEach(async () => {
   await app?.close();
   app = undefined;
+  vi.useRealTimers();
 });
 
 async function setup(

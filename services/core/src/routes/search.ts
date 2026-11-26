@@ -10,7 +10,7 @@ import { search } from '../services/search.ts';
 
 export interface SearchRouteDeps {
   db: Db;
-  config: Pick<Config, 'dataDir'>;
+  config: Pick<Config, 'dataDir' | 'searchWorkers'>;
   /** Standard: Worker auf `127.0.0.1:<SG_WORKER_PORT>`, Token aus dem Datenordner */
   worker?: Pick<WorkerClient, 'embed'>;
 }
@@ -42,12 +42,12 @@ export async function searchRoutes(app: FastifyInstance, deps: SearchRouteDeps):
         tags: ['Suche'],
         summary: 'Folien und Gesagtes durchsuchen, im Wortlaut und nach Bedeutung (F-SUC-01)',
         querystring: SearchQuerySchema,
-        response: { 200: SearchResponseSchema, 400: ApiErrorSchema },
+        response: { 200: SearchResponseSchema, 400: ApiErrorSchema, 503: ApiErrorSchema },
       },
     },
     async (request) =>
       search(
-        { db, worker },
+        { db, worker, parallelWorkers: deps.config.searchWorkers },
         { q: request.query.q, moduleId: request.query.module_id, limit: request.query.limit },
       ),
   );

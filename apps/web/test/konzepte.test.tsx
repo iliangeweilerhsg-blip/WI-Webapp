@@ -742,6 +742,34 @@ describe('Inbox: Vorschläge', () => {
     await waitFor(() => expect(posts()[0]?.body).toEqual({ action: 'accept', ids: [I_NEW] }));
   });
 
+  it('Grenze der Inbox: bis 14 Tage bleibt in der Hauptliste, darüber kommt zu „älter“', async () => {
+    const HOUR = 60 * 60 * 1000;
+    const ago = (hours: number) => new Date(Date.now() - hours * HOUR).toISOString();
+    // 13 Tage und 15 Tage plus je ein Eintrag knapp an der 14-Tage-Grenze. Genau 14 Tage bleibt oben: die Prüfung ist
+    // „älter als“ (`>`). Das geht, weil die gefälschte Uhr steht und `ago()` denselben Zeitpunkt sieht wie die Inbox.
+    const I_13 = id(905);
+    const I_13_23H = id(906);
+    const I_14_1H = id(907);
+    const I_15 = id(908);
+    const I_14 = id(909);
+    boot([
+      newItem({ id: I_13, concept_id: C_FA, created_at: ago(13 * 24) }),
+      newItem({ id: I_13_23H, concept_id: id(809), created_at: ago(13 * 24 + 23) }),
+      newItem({ id: I_14_1H, concept_id: id(810), created_at: ago(14 * 24 + 1) }),
+      newItem({ id: I_15, concept_id: C_BCNF, created_at: ago(15 * 24) }),
+      newItem({ id: I_14, concept_id: id(811), created_at: ago(14 * 24) }),
+    ]);
+    wrap(<SuggestionInbox />);
+    await screen.findAllByText('Dritte Normalform');
+    const older = screen.getByTestId('inbox-older');
+    expect(within(older).getByText('2 ältere Vorschläge')).toBeInTheDocument();
+    expect(older.contains(rowOf(I_15))).toBe(true);
+    expect(older.contains(rowOf(I_14_1H))).toBe(true);
+    expect(older.contains(rowOf(I_14))).toBe(false);
+    expect(older.contains(rowOf(I_13_23H))).toBe(false);
+    expect(older.contains(rowOf(I_13))).toBe(false);
+  });
+
   it('lädt alle Seiten offener Einträge; ab 2000 sagt ein Satz, dass weitere später kommen', async () => {
     boot(Array.from({ length: 450 }, (_, i) => newItem({ id: id(50_000 + i), concept_id: id(60_000 + i) })));
     const first = wrap(<SuggestionInbox />);

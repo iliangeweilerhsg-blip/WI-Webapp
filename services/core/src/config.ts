@@ -31,6 +31,8 @@ export interface Config {
    * beides ab: kein Socket, keine Schlüsseldatei (sie wird beim Start gelöscht).
    */
   tunnel: boolean;
+  /** `max_parallel_workers_per_gather` der Suche (`SG_SEARCH_WORKERS`, 0–4, Standard 2) */
+  searchWorkers: number;
 }
 
 const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'];
@@ -152,6 +154,16 @@ export function parseMoodleActions(raw: string): MoodleActionId[] {
   return [...new Set(ids)] as MoodleActionId[];
 }
 
+/** Liest `SG_SEARCH_WORKERS`: ganze Zahl 0–4, leer = 2 */
+export function parseSearchWorkers(raw: string | undefined): number {
+  const text = (raw ?? '').trim();
+  if (text === '') return 2;
+  if (!/^\d+$/.test(text) || Number(text) > 4) {
+    throw new Error(`SG_SEARCH_WORKERS muss eine ganze Zahl von 0 bis 4 sein: ${text.slice(0, 20)}`);
+  }
+  return Number(text);
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const port = env.SG_CORE_PORT ? Number(env.SG_CORE_PORT) : CORE_PORT;
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -173,6 +185,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     moodleUrl,
     moodleActions: parseMoodleActions(env.SG_MOODLE_ACTIONS ?? ''),
     bonjour: !['0', 'false', 'off', 'nein'].includes((env.SG_BONJOUR ?? '').trim().toLowerCase()),
+    searchWorkers: parseSearchWorkers(env.SG_SEARCH_WORKERS),
     tunnel: !['0', 'false', 'off', 'nein'].includes((env.SG_TUNNEL ?? '').trim().toLowerCase()),
   };
 }

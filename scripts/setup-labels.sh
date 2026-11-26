@@ -14,7 +14,12 @@ create "status:freigegeben" "1D76DB" "Von Claude freigegeben – Owner kann merg
 create "status:blockiert"   "B60205" "Rückfrage an den Owner nötig (Frage steht im Issue)"
 create "modell:flash"       "C5DEF5" "Einfache Aufgabe – Flash-Modell reicht"
 create "argon:limit"        "5319E7" "Argons Kontingent aufgebraucht – Claude übernimmt"
-create "entscheidung"     "FEF2C0" "Frage an den Owner (Übersicht in #188)"
+create "entscheidung"     "FEF2C0" "Frage an den Owner (Übersicht in docs/UEBERSICHT.md)"
 create "dringend"         "B60205" "Entscheidung ist eilig (zusammen mit entscheidung)"
+create "schnittstelle"    "5319E7" "Betrifft gemeinsame Verträge oder andere Bereiche – Architekt entscheidet"
+create "idee"             "C2E0C6" "Einfall, noch nicht entschieden (Liste in docs/IDEEN.md)"
+for b in vorlesung wissen lernen organisation plattform gestaltung; do
+  create "bereich:$b"     "BFD4F2" "Gehört zum Bereich $b (docs/bereiche/$b/STAND.md)"
+done
 
 echo "Labels angelegt."

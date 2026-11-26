@@ -107,6 +107,16 @@ describe('Suche: Zustände', () => {
     expect(options()).toHaveLength(0);
   });
 
+  it('Zeitlimit des Core (503 search_timeout): eigener Hinweis statt „nicht erreichbar“', async () => {
+    core.searchTimeout = true;
+    const user = userEvent.setup();
+    render(<Host />);
+    await typeQuery(user, 'normalform');
+    expect(await screen.findByText(/Die Suche hat zu lange gedauert/)).toBeVisible();
+    expect(screen.queryByText('Suche gerade nicht erreichbar')).toBeNull();
+    expect(options()).toHaveLength(0);
+  });
+
   it('Core aus: dieselbe Zeile', async () => {
     core.down = true;
     const user = userEvent.setup();
