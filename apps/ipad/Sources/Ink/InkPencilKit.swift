@@ -109,7 +109,9 @@ enum InkPencilKit {
                     timeOffset: point.timeOffset,
                     force: Double(point.force),
                     azimuth: Double(point.azimuth),
-                    altitude: Double(point.altitude)
+                    altitude: Double(point.altitude),
+                    width: Double(point.size.width),
+                    height: Double(point.size.height)
                 )
             }
         )

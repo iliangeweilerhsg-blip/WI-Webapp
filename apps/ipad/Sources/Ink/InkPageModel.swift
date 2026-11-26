@@ -44,6 +44,10 @@ final class InkPageModel {
 
     /// Start der laufenden Session für `t_start_ms`/`t_end_ms`. Ohne Session `nil`.
     @ObservationIgnored var sessionStartedAt: Date?
+    /// Striche mit Breite je Punkt (`sizes`, Format v2) kodieren. Gesetzt wird der Wert dort, wo das Modell entsteht,
+    /// aus `SyncEngine.strokeSizesSupported` (VERTRAEGE §23.7). Ändert er sich bei offener Seite, gilt er ab dem
+    /// nächsten Öffnen. Vorgabe: aus (Format v1).
+    @ObservationIgnored var includeSizes = false
     /// Anschluss für den Sync (T1-14): bekommt jede Änderung im neutralen Format
     @ObservationIgnored var onStrokeChanges: (([InkStrokeChange]) -> Void)?
     /// Wird nach jedem erfolgreichen Speichern aufgerufen, mit dem geschriebenen Stand (Vorschaubild der Seitenleiste)
@@ -195,6 +199,10 @@ final class InkPageModel {
 
     // MARK: Neutrales Format
 
+    private var codecOptions: InkCodecOptions {
+        InkCodecOptions(includeSizes: includeSizes)
+    }
+
     /// Alle Striche der Seite im Format des Schemas, in Zeichenreihenfolge: erst Textmarker, dann Schrift
     func neutralStrokes() -> [Stroke] {
         neutralStrokes(.highlight) + neutralStrokes(.ink)
@@ -209,7 +217,8 @@ final class InkPageModel {
         for (index, stroke) in strokes.enumerated() {
             let sample = InkPencilKit.sample(from: stroke, layer: layer)
             if let encoded = InkStrokeCodec.encode(
-                sample, clientID: diff.clientIDs[index], sessionStartedAt: sessionStartedAt)
+                sample, clientID: diff.clientIDs[index], sessionStartedAt: sessionStartedAt,
+                options: codecOptions)
             {
                 result.append(encoded)
             }
@@ -292,7 +301,8 @@ final class InkPageModel {
         for upsert in diff.upserts {
             let sample = InkPencilKit.sample(from: strokes[upsert.index], layer: layer)
             if let encoded = InkStrokeCodec.encode(
-                sample, clientID: upsert.clientID, sessionStartedAt: sessionStartedAt)
+                sample, clientID: upsert.clientID, sessionStartedAt: sessionStartedAt,
+                options: codecOptions)
             {
                 changes.append(.upsert(encoded))
             }

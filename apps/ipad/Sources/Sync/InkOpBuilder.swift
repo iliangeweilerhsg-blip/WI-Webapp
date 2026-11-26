@@ -7,6 +7,11 @@ enum InkOpBuilder {
     /// So viele `client_id` je `stroke.remove`, damit eine Nachricht weit unter 1 MB bleibt
     static let maxRemovesPerOp = 500
 
+    /// Größer darf eine `stroke.add` mit `sizes` nicht werden (VERTRAEGE §23.3, Regel 2): `SyncEngine.maxMessageBytes`
+    /// minus 50 000 Byte Reserve für die spätere Zeitkorrektur (`correct`, die Zahlen werden länger) und den Abstand
+    /// zur harten Grenze.
+    static let maxStrokeAddBytes = SyncEngine.maxMessageBytes - 50_000
+
     /// Operationen für Strichänderungen einer Seite
     /// - Parameters:
     ///   - nowMS: lokale Zeit, zu der die Änderung entstand
@@ -23,21 +28,14 @@ enum InkOpBuilder {
         for change in changes {
             switch change {
             case .upsert(let stroke):
-                let op = StrokeAddOp(
-                    at: nowMS,
-                    clockUncertain: true,
-                    data: StrokeAddData(pageID: binding.pageID, stroke: stroke),
-                    kind: .strokeAdd,
-                    opID: makeID(),
-                    origin: nil,
-                    seq: nil,
-                    stream: binding.stream,
-                    type: .op
-                )
-                if let draft = makeDraft(
-                    .strokeAdd(op), kind: "stroke.add", stream: binding.stream, pageID: binding.pageID,
-                    sessionStartMS: stroke.tStartMS == nil ? nil : binding.sessionStartMS)
-                {
+                let opID = makeID()
+                var draft = strokeAddDraft(stroke, opID: opID, binding: binding, nowMS: nowMS)
+                // Regel 2 (VERTRAEGE §23.3): Gemessen wird die fertig kodierte Operation, mit Umschlag. Ist sie mit
+                // `sizes` zu groß, geht derselbe Strich ohne `sizes` (Format v1) mit derselben `op_id` hinaus.
+                if let built = draft, stroke.sizes != nil, built.json.utf8.count > maxStrokeAddBytes {
+                    draft = strokeAddDraft(stroke.with(sizes: .some(nil)), opID: opID, binding: binding, nowMS: nowMS)
+                }
+                if let draft {
                     drafts.append(draft)
                 }
             case .remove(let ids):
@@ -66,6 +64,25 @@ enum InkOpBuilder {
             }
         }
         return corrected(drafts, offsetMS: offsetMS)
+    }
+
+    private static func strokeAddDraft(
+        _ stroke: Stroke, opID: String, binding: InkBinding, nowMS: Int
+    ) -> OutboxDraft? {
+        let op = StrokeAddOp(
+            at: nowMS,
+            clockUncertain: true,
+            data: StrokeAddData(pageID: binding.pageID, stroke: stroke),
+            kind: .strokeAdd,
+            opID: opID,
+            origin: nil,
+            seq: nil,
+            stream: binding.stream,
+            type: .op
+        )
+        return makeDraft(
+            .strokeAdd(op), kind: "stroke.add", stream: binding.stream, pageID: binding.pageID,
+            sessionStartMS: stroke.tStartMS == nil ? nil : binding.sessionStartMS)
     }
 
     /// `notebook.create` für ein freies Notizbuch, das offline angelegt wurde (VERTRAEGE §11.3).
