@@ -9,7 +9,7 @@
 - **Gedächtnis:** Was über diese Session hinaus gelten soll, steht im Repo, nie nur im Chat. Dazu gehören Entscheidungen, Stand, Specs und Ideen. Sagt der Owner „Idee: …“, kommt sie in `docs/IDEEN.md`.
 - **Argon ist seit 11.11.2026 pausiert** (Owner-Entscheidung). Aufgaben gehen nur an Claude oder Claude-Subagents. Die Argon-Abschnitte in `docs/KOLLABORATION.md` ruhen.
 - **Kommentare:** Alle eigenen Kommentare beginnen mit `**[Claude]**`, Reviews mit `**[Claude-Review]**`. Owner und Agents nutzen dasselbe GitHub-Konto.
-- **Parallele Arbeit:** Subagents laufen in getrennten Worktrees und Branches mit disjunktem Scope. Die Schnittstellen werden vorher festgelegt.
+- **Parallele Arbeit:** Subagents laufen in getrennten Worktrees und Branches mit disjunktem Scope. Die Schnittstellen werden vorher festgelegt. Höchstens 4 Agents gleichzeitig, zusammengezählt über alle Sessions. Wer welche Aufgabe übernimmt, steht in der Stärken-Matrix in `docs/KOLLABORATION.md` §3.
 - **Modellwahl ist Pflicht:** Für jeden Subagent und jeden Workflow-Agenten wählst du das Modell bewusst nach der Tabelle „Modell-Routing“ in `docs/KOLLABORATION.md`. Den Standard nie einfach übernehmen.
 - **Merge-Regeln** (Owner-Freigabe vom 04.11.2026, angepasst am 11.11. und 26.11.2026):
   - Claude merged freigegebene PRs selbst nach main, mit Merge-Commit.

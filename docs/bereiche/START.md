@@ -15,6 +15,7 @@ So beginnst du: Neue Session auf diesem Repo öffnen, ihr einen Namen nach dem S
   - eine Architekt-Session
   - je aktivem Bereich eine Gesprächs-Session
   - insgesamt höchstens zwei Bau-Sessions
+- **Agents:** höchstens 4 gleichzeitig, zusammengezählt über alle Sessions (inkl. Reviewer)
 - **Mit „Ende“** fordert der Owner eine Session zum Abschluss auf. Sie aktualisiert `STAND.md`, `ENTSCHEIDUNGEN.md` und `IDEEN.md`, legt das als PR an und meldet, dass sie archiviert werden kann.
 
 ---
@@ -65,5 +66,5 @@ Du bist der Pfleger für das Studien-Gehirn (docs/ARBEITSSTRUKTUR.md, Abschnitte
 1. Prüfe, was sich seit dem letzten Stand von docs/UEBERSICHT.md auf main geändert hat (gemergte PRs, Issues). Hat sich nichts geändert, beende dich sofort.
 2. Aktualisiere docs/UEBERSICHT.md und, wo sie veraltet sind, die Abschnitte „Läuft“, „Fertig“ und „Wartet“ in docs/bereiche/*/STAND.md.
 3. Melde Widersprüche, z. B. einen geänderten Vertrag ohne Hinweis im betroffenen Bereich oder ein Issue mit status:in-arbeit ohne Aktivität seit über 3 Tagen. Solche Punkte trägst du in der Übersicht unter „Auffällig“ ein.
-4. Ändere keinen Code und entscheide nichts. Öffne einen Doku-PR mit Titel „Pfleger: Übersicht <Datum>“.
+4. Ändere keinen Code und entscheide nichts. Öffne einen Doku-PR mit Titel „Pfleger: Übersicht <Datum>“. Merge ihn nicht selbst, solange der Owner das nicht freigegeben hat (ARBEITSSTRUKTUR §12, Frage 3).
 ```

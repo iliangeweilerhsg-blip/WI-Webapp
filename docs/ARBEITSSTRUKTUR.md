@@ -221,7 +221,9 @@ Vorlage für einen Eintrag:
 - **Pfleger:** einmal täglich, frische Session, günstiges Modell. Ohne Änderungen seit dem letzten Lauf beendet er sich sofort.
   - *Vorschlag, braucht die Freigabe des Owners:* Pfleger-PRs, die **nur** `docs/UEBERSICHT.md`, `docs/bereiche/*/STAND.md` oder `docs/IDEEN.md` ändern, merged der Pfleger bei grüner CI ohne eigenes Review. *Warum:* Sonst kostet jeder tägliche Lauf zusätzlich ein Review, oder die Übersicht bleibt bis zur nächsten Architekt-Session liegen. Das Risiko ist gering, weil dabei weder Code noch Regeln geändert werden.
 - **Sessions und Fenster:** Namensschema, Lebensdauer und Abschluss mit „Ende“ stehen in [`bereiche/START.md`](bereiche/START.md). Jede Session ist zum Wegwerfen, weil das Gedächtnis im Repo liegt.
-- **Wochenrunde, jeden Mittwoch:** Mittwochs wird das Wochenlimit des Owners zurückgesetzt, also sind Credits sicher verfügbar. Arbeitsintensives wie neue Bau-Sessions plant man darum in die Tage direkt nach Mittwoch, gegen Ende der Woche laufen eher Gespräche und Kleines. Der Architekt schreibt eine Seite für den Owner mit vier Teilen: was fertig ist, was hakt, welche Entscheidungen anstehen und welche neuen Ideen sortiert werden müssen.
+- **Wochenrunde, jeden Mittwoch.** *Warum Mittwoch:* Dann wird das Wochenlimit des Owners zurückgesetzt, Credits sind sicher da.
+  - Arbeitsintensives wie neue Bau-Sessions liegt darum in den Tagen direkt nach Mittwoch. Gegen Ende der Woche laufen eher Gespräche und Kleines.
+  - Inhalt: Der Architekt schreibt eine Seite für den Owner mit vier Teilen: was fertig ist, was hakt, welche Entscheidungen anstehen und welche neuen Ideen sortiert werden müssen.
 
 *Warum:* Der Takt hat Stunden ohne Arbeit bezahlt. Ereignisse kosten nur, wenn etwas zu tun ist.
 
@@ -237,10 +239,10 @@ Vorlage für einen Eintrag:
 ## 10. Was weiter gilt
 
 Unverändert gelten:
-- Merge-Regeln und Review-Pflicht (`CLAUDE.md`)
+- Merge-Regeln und Review-Pflicht (`CLAUDE.md`), auch für Pfleger-PRs, bis der Owner Frage 3 in Abschnitt 12 entschieden hat
 - Review-Stufen A und B, Nachrunden-Regeln und Cache-Regel (`KOLLABORATION.md` §4a)
 - Modell-Routing (§4)
-- höchstens 4 Agents gleichzeitig **pro Session**
+- höchstens 4 Agents gleichzeitig, **zusammengezählt über alle Sessions** und inklusive Reviewer. Setzt der Owner eine andere Zahl, gilt diese. *Warum:* Das Limit schützt das gemeinsame 5-Stunden- und Wochen-Kontingent, und das teilen sich alle Sessions
 - Kommentar-Präfixe `**[Claude]**` und `**[Claude-Review]**`
 - keine Secrets
 
@@ -249,11 +251,11 @@ Unverändert gelten:
 - Ruhemodus mit ⚙-Zeilen
 - Tagesrhythmus (§6)
 
-#188 bleibt bis zur Einführung von `UEBERSICHT.md` die Übersicht.
+Abgelöst sind außerdem „Fragen an den Owner … in #188 verlinkt“ (KOLLABORATION §4a): Fragen bündelt jetzt der Architekt für die Wochenrunde, die Übersicht ist `docs/UEBERSICHT.md`. #188 wird mit dem Merge dieser Struktur geschlossen und verweist dorthin.
 
 ## 11. Einführung als Pilot
 
-1. **Freigabe** dieses Entwurfs durch den Owner, mit Änderungen.
+1. **Freigabe** dieses Entwurfs durch den Owner, mit Änderungen (erledigt am 26.11.2026).
 2. **Architekt legt an:**
    - `docs/bereiche/` mit den Vorlagen
    - `STAND.md` für alle sechs Bereiche aus dem heutigen Stand (offene Issues und PRs)
