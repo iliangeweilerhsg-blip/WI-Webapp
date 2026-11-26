@@ -259,7 +259,11 @@ Unverändert gelten:
    - `docs/bereiche/START.md` mit fertigen Startnachrichten für jede Rolle zum Einfügen in einen neuen Chat
    - die Labels
    - den Pfleger-Auftrag als geplante Aufgabe
-3. **Pilot mit zwei Bereichen, ein bis zwei Wochen:** Vorschlag **vorlesung** (#388, #324 H-3) und **plattform** (#79, Sync). Lernen hängt an #328.
+3. **Pilot mit zwei Bereichen, ein bis zwei Wochen: lernen und wissen** (Owner, 26.11.). *Warum:* Fast alle Funktionen der App hängen zumindest zum Teil daran. Hier unterscheidet sich das Projekt von anderen Lern-Apps.
+   - **Erster Schritt: Leitbild-Gespräch.** Der Owner beschreibt dem Architekten seine Vision für Lernen und Wissen. Der Architekt schreibt sie als Leitbild in die Spezifikation, in `01-PRODUKT.md` und `06-LERNMODELL-PLANER.md`, und der Owner gibt sie frei. *Warum:* Laut Owner ist die Vision bisher nicht durchgedrungen. Steht der Kern nicht schriftlich fest, baut jede Session eine gewöhnliche Lern-App.
+   - Erst danach entstehen die Specs der beiden Bereiche.
+   - Die ruhenden Bereiche bleiben in ihrem Stand. Fertiges wird trotzdem abgeschlossen, z. B. der Merge von #388, sobald der Mac auf main ist. Das erledigt der Architekt als Einzelpunkt.
+   - Damit ist #328 („Lernen oder Phase 2 fertig?“) in Richtung Lernen beantwortet.
 4. **Rückblick** mit dem Owner: Was hat geholfen, was hakt? Danach passen wir die Struktur an und machen sie zur Regel.
 
 ## 12. Offene Fragen an den Owner
@@ -267,6 +271,6 @@ Unverändert gelten:
 Geklärt: sechs Bereiche, gestaltung ist dabei (Owner, 26.11.). Grundsätzliche Änderungen laufen über die Spezifikation und den Architekten.
 
 Offen, jeweils mit Vorschlag:
-1. Welche zwei Bereiche starten den Pilot? *Vorschlag:* vorlesung und plattform. Dort liegen #388, #324 und #79. Gestaltung kann parallel an der Designsprache arbeiten, wenn der Owner dafür Zeit hat.
+1. ~~Pilot-Bereiche~~: lernen und wissen (Owner, 26.11.).
 2. Soll die Wochenrunde an einem festen Tag kommen? *Vorschlag:* Sonntag.
 3. Wer startet die Sessions? *Vorschlag:* der Owner selbst in claude.ai/code, mit den Startnachrichten aus `START.md`. Er behält so die Kontrolle, und keine Session läuft ohne Anlass.
