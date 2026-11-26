@@ -48,7 +48,7 @@ Die neue Struktur folgt drei Vorbildern:
 | Rolle | Wo | Aufgabe | Modell | Warum so |
 |---|---|---|---|---|
 | **Owner** | überall | Ziele, Prioritäten, Entscheidungen über Produkt, Kosten und Datenschutz | – | Wertungen gehören dem Menschen |
-| **Architekt** | eigene Session, **nur bei Bedarf** | Besitzt `VERTRAEGE.md`, Schemas, Migrationen, Merge- und Sicherheitsregeln. Löst Konflikte zwischen Bereichen und bündelt die Fragen an den Owner | Opus | Ein Besitzer für alles Gemeinsame (G2). Läuft nicht dauernd, weil Koordination teuer ist |
+| **Architekt (Vertretung des Owners)** | eigene Session, **nur bei Bedarf** | Gesprächspartner des Owners für alles Übergreifende: Richtung, Prioritäten, neue Ideen, Änderungen an der Spezifikation. Er besitzt `docs/spezifikation/`, `VERTRAEGE.md`, Schemas, Migrationen sowie die Merge- und Sicherheitsregeln. Er löst Konflikte zwischen Bereichen, bündelt die Fragen an den Owner und sortiert die Ideenliste | Opus | Ein Besitzer für alles Gemeinsame (G2). Läuft nicht dauernd, weil Koordination teuer ist |
 | **Bereichs-Lead, Gespräch** | eine Session pro Bereich und Thema | Bespricht Ideen mit dem Owner und schreibt die Spec. Startet **keine** Worker | Fable oder Opus | Ruhiger Raum für Konzepte (G6) |
 | **Bereichs-Lead, Bau** | **frische** Session pro Spec | Zerlegt in Aufgaben, startet Worker, lässt prüfen, merged, pflegt `STAND.md` | Opus | Sauberer, kleiner Kontext (G5) |
 | **Worker** | Subagent im eigenen Worktree | Setzt **eine** Aufgabe um, mit Tests | Sonnet | Günstig ausführen, wo Tests die Fehler finden |
@@ -71,8 +71,19 @@ Geschnitten nach **Fachgebiet**, nicht nach Technik. *Warum:* Fast jedes Feature
 | **lernen** | Karten und Wiederholung | `…/lernen`, Core `cards`, `review` |
 | **organisation** | Moodle, Abgaben, Fristen, Kalender, Planer | `…/abgabe`, `…/kalender`, `…/planer`, Core `moodle`, `calendar`, `organisation` |
 | **plattform** | `sg`-Start, Sync Mac und iPad, Kopplung, Backup, Papierkorb, Sicherheit, CI, Mac-Helfer | `apps/mac-tunnel/`, `infra/`, `scripts/`, Core `devices`, `backups`, `trash`, `system`, `settings` |
+| **gestaltung** | Designsprache für das ganze Projekt: Aussehen (Farben, Schrift, Abstände, Bausteine), Bedienung und Wirkung (Abläufe, Tonfall, User-Experience), Einheitlichkeit zwischen Web, Mac und iPad, UX-Durchläufe | `packages/ui-tokens/`, gemeinsame UI-Bausteine, `docs/ux/` (u. a. `MARKENKERN.md`, `DESIGN-FAHRPLAN.md`, `DESIGN-ENTSCHEIDUNGEN.md`) |
+
+### Sonderrolle gestaltung
+
+Gestaltung ist ein **Querschnittsbereich.** Er liefert die Designsprache und Bausteine, die anderen Bereiche bauen ihre Bildschirme damit selbst. *Warum:* Würde gestaltung jede Oberfläche selbst bauen, bräuchte jedes Feature zwei Bereiche. In Softwareteams heißt dieses Muster „Design-System-Team“ oder „Enabling Team“.
+
+- **Zuerst die Designsprache, unabhängig vom Rest.** Sie kann entstehen, ohne dass andere Bereiche warten.
+- **Früh an einer echten Ansicht erproben,** z. B. an der Vorlesungsansicht. Dann anpassen und erst danach ausrollen. *Warum:* Eine Designsprache, die lange nur auf dem Papier entsteht, passt später oft nicht zu den echten Abläufen. Kurze Rückmeldung schlägt den großen Wurf (G4).
+- **In jeder Spec** gibt es ein Feld „Gestaltung“. Bei größeren Oberflächen holt der Lead dort einen kurzen Gestaltungs-Check ein.
+- **Für die Grenze „höchstens zwei aktiv“** zählt gestaltung nur, wenn sie an eigenen Specs arbeitet, nicht für kurze Checks.
 
 **Gemeinsam und im Besitz des Architekten:**
+- `docs/spezifikation/`: die Wahrheit darüber, wie das Produkt sein soll (siehe Abschnitt 6a)
 - `docs/VERTRAEGE.md`
 - `packages/schemas/` und `packages/shared/`
 - Migrationen
@@ -87,6 +98,8 @@ Geschnitten nach **Fachgebiet**, nicht nach Technik. *Warum:* Fast jedes Feature
 ```
 docs/
   UEBERSICHT.md                 1 Seite, schreibt der Pfleger
+  IDEEN.md                      Eingang für Einfälle (Abschnitt 6b)
+  spezifikation/                wie das Produkt sein soll, Besitz: Architekt
   VERTRAEGE.md                  Besitz: Architekt
   bereiche/<bereich>/
     STAND.md                    höchstens 1 Seite, schreibt der Bau-Lead
@@ -137,6 +150,7 @@ docs/
 - **Ziel (Nutzersicht):** …
 - **Nicht Teil davon:** …
 - **Ablauf/Verhalten:** …
+- **Gestaltung:** genutzte Bausteine und Regeln der Designsprache, ggf. Gestaltungs-Check (ja/nein, Ergebnis)
 - **Schnittstellen:** neue/geänderte Verträge (§…) → Architekt
 - **Aufgaben:** 1. … 2. … (je ein PR, je ein Check)
 - **Akzeptanzkriterien:** prüfbar, eindeutig bestanden oder nicht bestanden
@@ -156,15 +170,44 @@ docs/
    - `STAND.md` ist aktualisiert.
    - Gemergt wird nach den bestehenden Merge-Regeln (`CLAUDE.md`).
 
+## 6a. Grundsätzliche Änderungen am Produkt
+
+Die **Spezifikation** (`docs/spezifikation/`) ist die eine Wahrheit darüber, wie das Produkt sein soll (G1).
+
+1. Der Owner bespricht die Änderung mit dem **Architekten** und trägt sie nicht selbst ein.
+2. Der Architekt trägt sie in die Spezifikation ein. Er prüft dabei die Folgen: betroffene Verträge, laufende Specs und Bereiche.
+3. Er hält die Entscheidung mit Grund fest, in `ENTSCHEIDUNGEN.md` des betroffenen Bereichs oder als geschlossenes `entscheidung`-Issue.
+4. Betroffene Bereiche bekommen einen Hinweis in ihrer `STAND.md`.
+
+*Warum:* Eine Änderung an der Produktidee hat oft Folgen an Stellen, die man nicht im Kopf hat. Wer sie einträgt, sollte das Ganze kennen. Eine Entscheidung, die nur im Chat fällt, kennt der nächste Chat nicht.
+
+## 6b. Einfälle und Ideen
+
+Einfälle kommen ständig, gerade beim Gestalten. **Festhalten und Entscheiden sind getrennt.** *Warum:* Löst jede Idee sofort Arbeit aus, wird nichts fertig (G3). Festhalten ohne Aufwand macht den Kopf frei, und nichts geht verloren.
+
+1. **Festhalten, sofort:** In jeder Session genügt „Idee: …“. Die Session trägt sie in `docs/IDEEN.md` ein und arbeitet normal weiter. Ein Eintrag hat Datum, Bereich und einen Satz zum Nutzen.
+2. **Sortieren, wöchentlich:** In der Wochenrunde geht der Architekt die neuen Ideen mit dem Owner durch. Jede wird **verworfen**, **geparkt** oder als **nächstes Thema** einem Bereich gegeben.
+3. **Umsetzen**, erst wenn sie dran ist: Das Gespräch des Bereichs macht daraus eine Spec, dann folgt der normale Ablauf.
+
+Ideen zu Aussehen oder Bedienung allgemein gehören **gestaltung**, Ideen zu einem Feature dem **Fachbereich**. `IDEEN.md` ist öffentlich, Persönliches gehört nicht hinein.
+
+Vorlage für einen Eintrag:
+
+```markdown
+- <Datum> · <bereich> · <Idee in einem Satz> – Nutzen: … – Status: neu | geparkt | verworfen | → Spec <link>
+```
+
 ## 7. Entscheidungsrechte
 
 | Entscheidet | Was |
 |---|---|
 | **Bereichs-Lead allein** | Umsetzung, Aufteilung in Aufgaben, Tests, interne Struktur im eigenen Bereich, kleine UX-Texte |
 | **Architekt** | Verträge, Schemas, Migrationen, Konflikte zwischen Bereichen, Review-Stufe im Zweifel, neue Abhängigkeiten |
-| **Owner** | Produktverhalten, das du merkst, Prioritäten und welche Bereiche aktiv sind, Kosten (KI-Budget, Abos), Datenschutz und was ins öffentliche Repo darf, Freigabe jeder Spec |
+| **Owner** | Produktverhalten, das du merkst, Prioritäten und welche Bereiche aktiv sind, Kosten (KI-Budget, Abos), Datenschutz und was ins öffentliche Repo darf, Freigabe jeder Spec, Grundzüge der Designsprache (Wirkung, Markenkern) |
 
 *Warum:* Heute wartet vieles auf den Owner. Mit klaren Rechten kommen nur noch echte Fragen bei ihm an.
+
+**Gespräch mit der Vertretung:** Der Owner kann mit dem Architekten jederzeit über alles Übergreifende reden und mit ihm entscheiden. Was dort entschieden wird, hält der Architekt **sofort** schriftlich fest (Abschnitt 6a). Im Rahmen der Tabelle darf er auch selbst entscheiden. Was dem Owner gehört, legt er mit Empfehlung vor.
 
 **Fragen an den Owner** laufen weiter als Issue mit Label `entscheidung`. Neu ist:
 - **Nicht mehr einzeln:** Der Architekt sammelt die Fragen und legt sie **einmal pro Woche** gebündelt vor, jede mit Empfehlung.
@@ -176,7 +219,7 @@ docs/
 
 - **Kein Stundentakt.** Arbeit startet, wenn der Owner ein Gespräch führt oder ein Ereignis eintritt: CI fertig, Review da, Merge. PR-Abos laufen wie bisher und enden nach dem Merge.
 - **Pfleger:** einmal täglich, frische Session, günstiges Modell. Ohne Änderungen seit dem letzten Lauf beendet er sich sofort.
-- **Wochenrunde:** Der Architekt schreibt eine Seite für den Owner mit drei Teilen: was fertig ist, was hakt, welche Entscheidungen anstehen.
+- **Wochenrunde:** Der Architekt schreibt eine Seite für den Owner mit vier Teilen: was fertig ist, was hakt, welche Entscheidungen anstehen und welche neuen Ideen sortiert werden müssen.
 
 *Warum:* Der Takt hat Stunden ohne Arbeit bezahlt. Ereignisse kosten nur, wenn etwas zu tun ist.
 
@@ -211,8 +254,9 @@ Unverändert gelten:
 1. **Freigabe** dieses Entwurfs durch den Owner, mit Änderungen.
 2. **Architekt legt an:**
    - `docs/bereiche/` mit den Vorlagen
-   - `STAND.md` für alle fünf Bereiche aus dem heutigen Stand (offene Issues und PRs)
-   - `UEBERSICHT.md`
+   - `STAND.md` für alle sechs Bereiche aus dem heutigen Stand (offene Issues und PRs)
+   - `UEBERSICHT.md` und `IDEEN.md`
+   - `docs/bereiche/START.md` mit fertigen Startnachrichten für jede Rolle zum Einfügen in einen neuen Chat
    - die Labels
    - den Pfleger-Auftrag als geplante Aufgabe
 3. **Pilot mit zwei Bereichen, ein bis zwei Wochen:** Vorschlag **vorlesung** (#388, #324 H-3) und **plattform** (#79, Sync). Lernen hängt an #328.
@@ -220,7 +264,9 @@ Unverändert gelten:
 
 ## 12. Offene Fragen an den Owner
 
-1. Passt der Schnitt in fünf Bereiche, oder willst du ihn anders?
-2. Welche zwei Bereiche starten den Pilot?
-3. Soll die Wochenrunde an einem festen Tag kommen?
-4. Starten die Sessions **du** (in claude.ai/code, je Bereich eine), oder soll der Architekt sie auf deinen Zuruf starten?
+Geklärt: sechs Bereiche, gestaltung ist dabei (Owner, 26.11.). Grundsätzliche Änderungen laufen über die Spezifikation und den Architekten.
+
+Offen, jeweils mit Vorschlag:
+1. Welche zwei Bereiche starten den Pilot? *Vorschlag:* vorlesung und plattform. Dort liegen #388, #324 und #79. Gestaltung kann parallel an der Designsprache arbeiten, wenn der Owner dafür Zeit hat.
+2. Soll die Wochenrunde an einem festen Tag kommen? *Vorschlag:* Sonntag.
+3. Wer startet die Sessions? *Vorschlag:* der Owner selbst in claude.ai/code, mit den Startnachrichten aus `START.md`. Er behält so die Kontrolle, und keine Session läuft ohne Anlass.
