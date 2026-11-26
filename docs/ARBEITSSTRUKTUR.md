@@ -219,7 +219,7 @@ Vorlage für einen Eintrag:
 
 - **Kein Stundentakt.** Arbeit startet, wenn der Owner ein Gespräch führt oder ein Ereignis eintritt: CI fertig, Review da, Merge. PR-Abos laufen wie bisher und enden nach dem Merge.
 - **Pfleger:** einmal täglich, frische Session, günstiges Modell. Ohne Änderungen seit dem letzten Lauf beendet er sich sofort.
-- **Wochenrunde:** Der Architekt schreibt eine Seite für den Owner mit vier Teilen: was fertig ist, was hakt, welche Entscheidungen anstehen und welche neuen Ideen sortiert werden müssen.
+- **Wochenrunde, jeden Mittwoch:** Mittwochs wird das Wochenlimit des Owners zurückgesetzt, also sind Credits sicher verfügbar. Arbeitsintensives wie neue Bau-Sessions plant man darum eher an den Wochenanfang ab Mittwoch. Der Architekt schreibt eine Seite für den Owner mit vier Teilen: was fertig ist, was hakt, welche Entscheidungen anstehen und welche neuen Ideen sortiert werden müssen.
 
 *Warum:* Der Takt hat Stunden ohne Arbeit bezahlt. Ereignisse kosten nur, wenn etwas zu tun ist.
 
@@ -272,5 +272,5 @@ Geklärt: sechs Bereiche, gestaltung ist dabei (Owner, 26.11.). Grundsätzliche 
 
 Offen, jeweils mit Vorschlag:
 1. ~~Pilot-Bereiche~~: lernen und wissen (Owner, 26.11.).
-2. Soll die Wochenrunde an einem festen Tag kommen? *Vorschlag:* Sonntag.
+2. ~~Tag der Wochenrunde~~: **Mittwoch** (Owner, 26.11.). Dann wird das Wochenlimit zurückgesetzt, und es sind sicher Credits da. Am Sonntag kann das Limit schon aufgebraucht sein.
 3. Wer startet die Sessions? *Vorschlag:* der Owner selbst in claude.ai/code, mit den Startnachrichten aus `START.md`. Er behält so die Kontrolle, und keine Session läuft ohne Anlass.
