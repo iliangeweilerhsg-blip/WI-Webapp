@@ -15,22 +15,21 @@ Die Regeln stehen in [`ARBEITSSTRUKTUR.md`](ARBEITSSTRUKTUR.md), den Stand jedes
 
 | Bereich | Offen, kurz |
 |---|---|
-| [vorlesung](bereiche/vorlesung/STAND.md) | PR #388 (iPad-Strichformat v2) fertig, wartet auf die Mac-Bestätigung des Owners. #79 wartet auf eine Messung |
+| [vorlesung](bereiche/vorlesung/STAND.md) | #388 (iPad-Strichformat v2) am 26.11. gemergt, Gerätetest durch den Owner offen. #79 wartet auf eine Messung |
 | [organisation](bereiche/organisation/STAND.md) | Moodle-Abgaben warten auf die Entscheidung #289 |
 | [plattform](bereiche/plattform/STAND.md) | Start, Backup und Konto-Fragen als Entscheidungen offen |
 | [gestaltung](bereiche/gestaltung/STAND.md) | Designsprache kann starten, wenn der Owner Zeit hat (Vorarbeit in `ux/`) |
 
 ## Wartet auf den Owner
 
-1. **Mac auf main bringen** (`pnpm sg stop`, `git pull`, `pnpm sg start`) und kurz bestätigen. Danach wird #388 gemergt, dann die iPad-App neu installieren und die Füller-Striche vergleichen.
+1. **iPad-App neu installieren** und die Füller-Striche auf dem Gerät mit dem Mac vergleichen (#388 ist gemergt).
 2. **Leitbild-Gespräch** für lernen und wissen. Startnachricht in [`bereiche/START.md`](bereiche/START.md).
 3. **Messung #79** (Zoom 1/2 in Chrome und Safari). Eilt nicht.
 4. **Offene Entscheidungen** (Label `entscheidung`) kommen gesammelt zur Wochenrunde am Mittwoch: #328 (durch den Pilot in Richtung Lernen beantwortet, wird nach dem Leitbild geschlossen), #289, #287, #271, #240, #239, #219, #209, #208, #207, #206, #205, #204, #203, #202, #201, #189.
 
 ## Laufende PRs
 
-- #388: vorlesung, freigegeben, wartet auf Punkt 1
-- #404: Arbeitsstruktur und diese Übergabe
+- keine
 
 ## Nächste Wochenrunde
 

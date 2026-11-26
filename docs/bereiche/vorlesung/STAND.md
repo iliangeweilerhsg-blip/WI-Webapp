@@ -1,6 +1,6 @@
-# Stand: vorlesung   (zuletzt: 26.11.2026, Claude (Übergabe))
+# Stand: vorlesung   (zuletzt: 26.11.2026, Claude)
 
-Status: ruht (nicht im Pilot), außer dem Abschluss von #388.
+Status: ruht (nicht im Pilot). Offen ist nur der Gerätetest zu #388.
 
 ## Bestand (kurz)
 - iPad-App mit Tinte, Folien, Sync, Kopplung: [apps/ipad/Sources/](../../../apps/ipad/Sources/) (Ordner Ink, Slides, Sync, Pairing, Library).
@@ -12,16 +12,15 @@ Status: ruht (nicht im Pilot), außer dem Abschluss von #388.
 - Anleitungen: [IPAD.md](../../anleitungen/IPAD.md), [VORLESUNGSTAG.md](../../anleitungen/VORLESUNGSTAG.md), [TRANSKRIPTION.md](../../anleitungen/TRANSKRIPTION.md).
 
 ## Läuft
-- PR #388 – Strichformat v2: iPad sendet die Breite je Punkt. Fertig, CI grün, `status:freigegeben`. Schließt #382. Wird erst gemergt, wenn der Owner bestätigt, dass sein Mac auf main ist.
-- #324 H-3 (iPad-Teil) – erst nach #388.
+- #324 H-3 (iPad-Teil) – kann jetzt angegangen werden, weil #388 gemergt ist.
 - #79 – Ink-Renderer. Code erledigt, wartet auf die Messung des Owners (Zoom 1 und 2, Chrome und Safari).
 
 ## Fertig seit letzter Übersicht
 - Kurze v1-Striche behalten ihre Fläche (#394, #396).
+- Strichformat v2 auf dem iPad: Das iPad sendet die Breite je Punkt (#388, gemergt am 26.11.2026, schließt #382).
 
 ## Wartet auf den Owner
-- Bestätigen, dass der Mac auf main ist (Voraussetzung für das Mergen von #388).
-- Nach dem Merge: iPad-App neu installieren und Füller-Striche auf dem Gerät vergleichen (VERTRAEGE §23.10).
+- iPad-App neu installieren und Füller-Striche auf dem Gerät mit dem Mac vergleichen (VERTRAEGE §23.10).
 - Messung für #79.
 - #287 – Wie soll das iPad melden, wenn es Notizbücher nicht speichern kann?
 - #271 – Notizen zur selben Folie in mehreren Vorlesungen: eine Seite oder je Vorlesung eine?
@@ -36,7 +35,6 @@ Status: ruht (nicht im Pilot), außer dem Abschluss von #388.
 - Strichformat v2 (VERTRAEGE §23) berührt iPad, Core und Web. Keine weitere Änderung offen.
 
 ## Als Nächstes
-1. Owner bestätigt Mac auf main, dann #388 mergen.
-2. iPad-App neu installieren, Füller-Striche vergleichen.
-3. #324 H-3 (iPad-Teil) angehen.
-4. #79 schließen, sobald die Messung vorliegt.
+1. Gerätetest des Owners zu #388 auswerten.
+2. #324 H-3 (iPad-Teil) angehen, sobald der Bereich wieder aktiv ist.
+3. #79 schließen, sobald die Messung vorliegt.
